@@ -1,0 +1,147 @@
+{
+  "schema": 1,
+  "kind": "flow",
+  "id": "patent-annual-fee",
+  "name": "专利年费缴纳",
+  "version": "1.0",
+  "updated": "2026-11-05",
+  "changelog": "第一版：按公司《专利年费缴费流程总结》第二版整理",
+
+  "fields": [
+    {"key": "title", "label": "事由", "type": "text", "required": true},
+    {"key": "amount", "label": "金额", "type": "money", "required": true},
+    {"key": "company", "label": "公司", "type": "text", "required": true},
+    {"key": "owner", "label": "课题负责人", "type": "text", "required": true},
+    {"key": "patent_nos", "label": "专利申请号", "type": "list", "required": true},
+    {"key": "project", "label": "科研经费课题", "type": "dict", "dict": "projects", "required": true},
+    {"key": "org_unit", "label": "组织机构", "type": "dict", "dict": "orgs", "required": true},
+    {"key": "deadline", "label": "缴费截止日", "type": "date", "required": false}
+  ],
+
+  "dicts": {
+    "vendors": ["长沙智路星耀知识产权代理有限公司"],
+    "projects": ["城市更新改造技术研究院-本部"],
+    "orgs": ["城市更新改造技术研究院"]
+  },
+
+  "steps": [
+    {
+      "id": "s1", "name": "填写《科技研发课题请示》", "summary": "在协同平台新建一个请示，附上合同和缴费通知函", "phase": "申请",
+      "kind": "action", "automation": "semi", "eta_days": 0,
+      "entry": [
+        {"type": "path", "label": "友空间", "value": "工作台 → 协同平台 → 协同工作 → 新建事项",
+         "chain": ["工作台", "信创协同", "流程中心", "发起流程", "全部模板", "科技研发课题请示", "立即办理"]},
+        {"type": "template", "label": "协同模板", "value": "科技研发课题请示"}
+      ],
+      "account": "本人",
+      "requires": [],
+      "generate": {
+        "kind": "text",
+        "template": "关于{title}的请示\n\n{org_unit}：\n\n拟缴纳{title}，费用约{amount}元，列入课题专项经费。\n\n妥否，请示。\n\n{project}\n{year}年{month}月"
+      },
+      "materials": [
+        {"id": "m_contract", "name": "与专利公司签订的合同", "required": true,
+         "usage": "upload", "accept": ["pdf", "ofd"], "reusable": true},
+        {"id": "m_notice", "name": "专利公司缴费通知函", "required": true,
+         "usage": "upload", "accept": ["pdf", "ofd", "jpg", "png"]}
+      ],
+      "checks": [
+        {"type": "materials_present", "args": {"ids": ["m_contract", "m_notice"]},
+         "message": "请示必须附合同和缴费通知函"}
+      ],
+      "notes": [
+        "「公司」「妥否，请示」「XX课题组」「20XX年XX月」是固定格式",
+        "不知道具体金额时，可以只写「列入课题专项经费」"
+      ],
+      "produces": [{"name": "请示单号", "type": "text"}],
+      "next": ["s2"]
+    },
+    {
+      "id": "s2", "name": "等待请示审批", "summary": "等 5 位审批人，卡住就催一下", "phase": "申请",
+      "kind": "wait", "automation": "manual", "eta_days": 7,
+      "remind_after_days": 3, "approvers": 5,
+      "requires": ["s1"],
+      "notes": ["超过 3 天没动静，提醒催一下"],
+      "next": ["s3"]
+    },
+    {
+      "id": "s3", "name": "登录司库一体化平台", "summary": "换成课题负责人的账号登录", "phase": "缴款",
+      "kind": "action", "automation": "manual",
+      "entry": [{"type": "url", "label": "司库一体化平台", "value": ""}],
+      "account": "课题负责人（先退出自己的友空间账号）",
+      "requires": ["s2"],
+      "checks": [{"type": "manual", "message": "确认右上角组织机构是科研院"}],
+      "notes": [
+        "自己的账号和负责人账号会冲突，必须先退出再扫码登录",
+        "切换过组织机构后，要重新新建模板才生效"
+      ],
+      "next": ["s4"]
+    },
+    {
+      "id": "s4", "name": "上传影像", "summary": "把年费票和代理费票传进报账系统", "phase": "缴款",
+      "kind": "action", "automation": "semi",
+      "entry": [{"type": "path", "label": "报账系统", "value": "对外成本费用付款申请 → 影像"}],
+      "account": "课题负责人",
+      "requires": ["s3"],
+      "materials": [
+        {"id": "m_tax", "name": "中央非税收入统一票据", "required": true,
+         "usage": "upload", "accept": ["pdf"]},
+        {"id": "m_agent", "name": "代理费发票", "required": true,
+         "usage": "upload", "accept": ["pdf"]}
+      ],
+      "checks": [
+        {"type": "manual", "message": "两张票据合计应等于申请金额"},
+        {"type": "pdf_contains", "args": {"material": "m_tax", "keyword": "{project}"},
+         "message": "发票必须备注课题名称"},
+        {"type": "manual", "message": "非税票据要在财政部平台验证"}
+      ],
+      "notes": [
+        "先切「发票」标签传年费票，再切「其他电子票据」传代理费",
+        "多个发票会自动合成一张，为了清晰最好分开传",
+        "最后关闭影像单据"
+      ],
+      "next": ["s5"]
+    },
+    {
+      "id": "s5", "name": "填写对外成本费用付款申请单", "summary": "按下面的值把申请单填完", "phase": "缴款",
+      "kind": "action", "automation": "semi",
+      "entry": [{"type": "path", "label": "报账系统", "value": "对外成本费用付款申请"}],
+      "account": "课题负责人",
+      "requires": ["s4"],
+      "fields": [
+        {"label": "成本费用属性", "value": "研发支出", "locked": true},
+        {"label": "是否有合同", "value": "否", "locked": true, "note": "选否才能填客商名称"},
+        {"label": "客商名称", "value": "{vendor}", "dict": "vendors"},
+        {"label": "资金来源", "value": "专项", "locked": true},
+        {"label": "付款摘要", "template": "{company}（{owner}）申请号 {patent_nos}"},
+        {"label": "付款期", "value": 60, "unit": "天", "min": 60, "note": "填 30 天被打回过"},
+        {"label": "科研经费课题", "value": "{project}", "dict": "projects"},
+        {"label": "含原始纸质附件", "value": "否"}
+      ],
+      "notes": ["事由不用填，填完客商会自动带出", "两个专利一起缴时，付款摘要里写两个申请号"],
+      "produces": [{"name": "付款申请单号", "type": "text"}],
+      "next": ["s6"]
+    },
+    {
+      "id": "s6", "name": "打印并粘贴", "summary": "打印三份材料，按顺序粘好", "phase": "报销",
+      "kind": "offline", "automation": "semi",
+      "requires": ["s5"],
+      "materials": [
+        {"id": "m_form", "name": "报销单（付款申请单）", "required": true, "usage": "print"},
+        {"id": "m_invoice", "name": "票据", "required": true, "usage": "print"},
+        {"id": "m_paste", "name": "费用报销粘贴单", "required": true, "usage": "print"}
+      ],
+      "assemble": [{"order": ["m_form", "m_invoice", "m_paste"], "output": "打印包.pdf"}],
+      "notes": ["报销单放第一个，粘贴单放最后，中间票据从小到大", "工具按这个顺序合并成一个 PDF，打一次就够"],
+      "next": ["s7"]
+    },
+    {
+      "id": "s7", "name": "送财务处", "summary": "把纸质件交到中建大厦 1014", "phase": "报销",
+      "kind": "offline", "automation": "manual",
+      "place": "中建大厦 1014",
+      "requires": ["s6"],
+      "notes": ["纸质件当面交"],
+      "next": []
+    }
+  ]
+}
