@@ -14,6 +14,9 @@ export type FlowNode = {
   x: number
   y: number
   state?: string
+  /** 卡片正文（Markdown）：新模型的主内容 */
+  body?: string
+  /** 老数据：字段数组，加载时会转成 body */
   fields?: Field[]
 }
 

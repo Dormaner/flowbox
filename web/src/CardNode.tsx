@@ -1,6 +1,8 @@
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import { HoverCtx } from './hover'
+import { bodyOf } from './migrate'
+import { mdStats } from './markdown'
 import type { FlowNode, Status } from './types'
 
 type Ctx = {
@@ -30,6 +32,13 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
 
   const st = ctx.statuses.find((s) => s.key === (n.state || ctx.statuses[0]?.key))
   const color = st?.color || '#C7CBD1'
+  const stats = mdStats(bodyOf(n))
+  const summary = (n.summary || stats.summary || '').replace(/\s+/g, ' ').trim()
+  const chips: string[] = []
+  if (stats.checks.total) chips.push(`${stats.checks.done}/${stats.checks.total} 材料`)
+  if (stats.files.length) chips.push(`📎 ${stats.files.length}`)
+  if (stats.owner) chips.push(stats.owner)
+  if (stats.due) chips.push(stats.due)
 
   useEffect(() => {
     if ((data as any).autoEdit && !autoEdited.has(id)) {
@@ -130,9 +139,11 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
             if (e.detail >= 2) start('sum')(e)
           }}
         >
-          {n.summary || ''}
+          {summary}
         </div>
       )}
+
+      {chips.length ? <div className="mini">{chips.join(' · ')}</div> : null}
 
       <Handle type="target" position={Position.Left} className="port left" />
       <Handle type="source" position={Position.Right} className="port right" />

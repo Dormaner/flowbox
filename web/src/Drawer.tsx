@@ -1,51 +1,41 @@
-import { useState } from 'react'
-import type { Field, FlowNode, Status } from './types'
-import { FieldEdit, FieldView } from './fieldui'
+import { useEffect, useRef, useState } from 'react'
+import type { FlowNode, Status } from './types'
+import { bodyOf } from './migrate'
+import { mdStats, mdToHtml } from './markdown'
+import { fileDataUrl, fileUrl, isDesktop } from './storage'
+import { uploadFile } from './assets'
 
-/** 字段类型：label 是给人看的，hint 是选的时候那句解释 */
-export const FIELD_TYPES: { type: string; label: string; hint: string }[] = [
-  { type: 'text', label: '文字', hint: '一句话，比如「谁办」' },
-  { type: 'longtext', label: '多行文本', hint: '整段说明，回车换行' },
-  { type: 'number', label: '数字', hint: '金额、天数' },
-  { type: 'date', label: '日期', hint: '2026-12-31' },
-  { type: 'user', label: '人员', hint: '谁负责' },
-  { type: 'select', label: '单选', hint: '从固定选项里挑一个' },
-  { type: 'multiselect', label: '多选', hint: '可以挑多个' },
-  { type: 'list', label: '清单', hint: '一条一行，可勾选' },
-  { type: 'checkbox', label: '复选框', hint: '是 / 否' },
-  { type: 'link', label: '超链接', hint: '网址 + 按钮文字' },
-  { type: 'attachment', label: '附件', hint: '挂真实文件，一行一个' },
-  { type: 'image', label: '图片', hint: '截图，一行一张' },
-]
+const EMBED_RE = /!\[\[([^\]]+)\]\]/g
 
-const labelOf = (t: string) => FIELD_TYPES.find((x) => x.type === t)?.label || t
-
-function blankValue(type: string): any {
-  if (type === 'list' || type === 'multiselect' || type === 'attachment' || type === 'image')
-    return []
-  if (type === 'checkbox') return false
-  if (type === 'link') return { url: '', text: '' }
-  return ''
-}
-
-/** 换类型时尽量把旧值带过去，带不过去就留空，绝不抛错 */
-export function convert(type: string, v: any): any {
-  if (type === 'list' || type === 'multiselect') {
-    if (Array.isArray(v))
-      return v.map((x) => (typeof x === 'object' && x ? x.text ?? x.name ?? '' : String(x)))
-    return String(v ?? '').split('\n').map((s) => s.trim()).filter(Boolean)
-  }
-  if (type === 'attachment') return Array.isArray(v) ? v.filter((x) => typeof x === 'object') : []
-  if (type === 'image') return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []
-  if (type === 'checkbox') return v === true || v === 'true' || v === '是'
-  if (type === 'link') {
-    if (v && typeof v === 'object') return { url: v.url || '', text: v.text || '' }
-    return { url: String(v ?? ''), text: '' }
-  }
-  if (Array.isArray(v))
-    return v.map((x) => (typeof x === 'object' && x ? x.text ?? x.name ?? '' : x)).join('\n')
-  if (v && typeof v === 'object') return v.url || v.name || ''
-  return v == null ? '' : String(v)
+/** 把正文里引用到的文件换成能显示的地址（桌面版是 data URL） */
+function useEmbeds(project: string, body: string) {
+  const [map, setMap] = useState<Record<string, string>>({})
+  useEffect(() => {
+    const rels = new Set<string>()
+    let m: RegExpExecArray | null
+    EMBED_RE.lastIndex = 0
+    while ((m = EMBED_RE.exec(body))) rels.add(m[1].trim())
+    if (!rels.size) {
+      setMap({})
+      return
+    }
+    let alive = true
+    ;(async () => {
+      const next: Record<string, string> = {}
+      for (const rel of rels) {
+        try {
+          next[rel] = await fileDataUrl(project, rel)
+        } catch {
+          /* 缺文件就留空 */
+        }
+      }
+      if (alive) setMap(next)
+    })()
+    return () => {
+      alive = false
+    }
+  }, [project, body, isDesktop])
+  return map
 }
 
 type Props = {
@@ -81,40 +71,94 @@ export default function Drawer({
   onClose,
   onToast,
 }: Props) {
-  const fields = node.fields || []
-  const [picking, setPicking] = useState(false)
   const edit = mode === 'edit'
+  const body = bodyOf(node)
+  const stats = mdStats(body)
+  const embeds = useEmbeds(project, body)
+  const taRef = useRef<HTMLTextAreaElement>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
 
-  const setFields = (next: Field[]) => onPatch({ fields: next })
-  const putField = (idx: number, value: any, extra?: Partial<Field>) => {
-    setFields(fields.map((f, i) => (i === idx ? { ...f, ...extra, value } : f)))
+  /** 在光标处插入一段文字 */
+  const insert = (text: string) => {
+    const ta = taRef.current
+    const cur = bodyOf(node)
+    if (!ta) {
+      onPatch({ body: `${cur}\n${text}`.trim() })
+      return
+    }
+    const start = ta.selectionStart ?? cur.length
+    const end = ta.selectionEnd ?? cur.length
+    const next = cur.slice(0, start) + text + cur.slice(end)
+    onPatch({ body: next })
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.selectionStart = ta.selectionEnd = start + text.length
+    })
   }
-  const renameField = (idx: number, label: string) => {
-    const t = label.trim()
-    if (!t || t === fields[idx].label) return
-    setFields(fields.map((f, i) => (i === idx ? { ...f, label: t } : f)))
+
+  const addFiles = async (files: File[]) => {
+    if (!files.length) return
+    const lines: string[] = []
+    for (const f of files) {
+      try {
+        const saved = await uploadFile(project, node.id, f)
+        lines.push(`![[${saved.rel}]]`)
+      } catch (e: any) {
+        onToast(e?.message || String(e))
+      }
+    }
+    if (lines.length) insert(`\n${lines.join('\n')}\n`)
   }
-  const retypeField = (idx: number, type: string) => {
-    if (fields[idx].type === type) return
-    setFields(fields.map((x, i) => (i === idx ? { ...x, type, value: convert(type, x.value) } : x)))
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+      e.preventDefault()
+      onMode(edit ? 'view' : 'edit')
+      return
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+      e.preventDefault()
+      wrap('**')
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault()
+      insert('[](url)')
+    }
+    if (e.key === 'Tab' && !e.shiftKey) {
+      e.preventDefault()
+      insert('  ')
+    }
   }
-  const moveField = (idx: number, dir: -1 | 1) => {
-    const j = idx + dir
-    if (j < 0 || j >= fields.length) return
-    const next = fields.slice()
-    const tmp = next[idx]
-    next[idx] = next[j]
-    next[j] = tmp
-    setFields(next)
+
+  /** 给选中文字加包裹（加粗、行内代码） */
+  const wrap = (mark: string) => {
+    const ta = taRef.current
+    if (!ta) return
+    const cur = bodyOf(node)
+    const s = ta.selectionStart ?? 0
+    const e2 = ta.selectionEnd ?? 0
+    const sel = cur.slice(s, e2) || (mark === '**' ? '加粗文字' : 'code')
+    onPatch({ body: cur.slice(0, s) + mark + sel + mark + cur.slice(e2) })
+    requestAnimationFrame(() => {
+      ta.focus()
+      ta.selectionStart = s + mark.length
+      ta.selectionEnd = s + mark.length + sel.length
+    })
   }
-  const deleteField = (idx: number) => {
-    const f = fields[idx]
-    if (!window.confirm(`删除字段「${f.label || '未命名'}」？可以用 Ctrl+Z 撤回。`)) return
-    setFields(fields.filter((_, i) => i !== idx))
-  }
-  const addField = (type: string) => {
-    setPicking(false)
-    setFields([...fields, { type, label: '', value: blankValue(type) }])
+
+  const toggleTask = (index: number) => {
+    const lines = bodyOf(node).split('\n')
+    let n = -1
+    for (let i = 0; i < lines.length; i++) {
+      if (/^\s*[-*]\s+\[( |x|X)\]/.test(lines[i])) {
+        n++
+        if (n === index) {
+          lines[i] = lines[i].replace(/\[( |x|X)\]/, (_m, c) => (c === ' ' ? '[x]' : '[ ]'))
+          break
+        }
+      }
+    }
+    onPatch({ body: lines.join('\n') })
   }
 
   const startResize = (e: React.PointerEvent) => {
@@ -124,7 +168,7 @@ export default function Drawer({
     const startW = width
     document.body.style.cursor = 'col-resize'
     const move = (ev: PointerEvent) =>
-      onWidth(Math.min(820, Math.max(300, startW + (startX - ev.clientX))))
+      onWidth(Math.min(900, Math.max(340, startW + (startX - ev.clientX))))
     const up = () => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
@@ -159,38 +203,22 @@ export default function Drawer({
       style={{ width, ...(float ? { left: pos.x, top: pos.y } : {}) }}
     >
       <div className="resizer" onPointerDown={startResize} title="拖动调宽" />
-      <div
-        className="dh"
-        onPointerDown={startDrag}
-        style={{ cursor: float ? 'move' : 'default' }}
-      >
+      <div className="dh" onPointerDown={startDrag} style={{ cursor: float ? 'move' : 'default' }}>
         <div className="modesw">
-          <button
-            id="m-edit"
-            className={edit ? 'on' : ''}
-            onClick={() => onMode('edit')}
-            title="编辑（Ctrl+E）"
-          >
+          <button id="m-edit" className={edit ? 'on' : ''} onClick={() => onMode('edit')} title="Ctrl+/">
             编辑
           </button>
-          <button
-            id="m-view"
-            className={!edit ? 'on' : ''}
-            onClick={() => onMode('view')}
-            title="预览（Ctrl+E）"
-          >
+          <button id="m-view" className={!edit ? 'on' : ''} onClick={() => onMode('view')} title="Ctrl+/">
             预览
           </button>
         </div>
         <span className="sp" />
-        <button
-          title={float ? '停靠到右侧' : '变成浮动窗口（可拖动）'}
-          onClick={onToggleFloat}
-        >
+        <button title={float ? '停靠到右侧' : '浮动窗口'} onClick={onToggleFloat}>
           {float ? '⇥' : '⧉'}
         </button>
         <button onClick={onClose}>✕</button>
       </div>
+
       <div className="db">
         {edit ? (
           <input
@@ -203,130 +231,102 @@ export default function Drawer({
           <div className="dname-ro">{node.name}</div>
         )}
 
-        {edit ? (
-          <textarea
-            className="dsum"
-            defaultValue={node.summary || ''}
-            key={node.id + ':sum'}
-            placeholder="一句话说明这一步（会显示在卡片上）"
-            onBlur={(e) => onPatch({ summary: e.target.value })}
-          />
-        ) : node.summary ? (
-          <div className="dsum-ro">{node.summary}</div>
-        ) : null}
-
         <div className="drow">
           <span>状态</span>
           <div className="chips">
-            {statuses.map((s) => {
-              const on = s.key === (node.state || statuses[0]?.key)
-              return (
-                <span
-                  key={s.key}
-                  className={'chip' + (on ? ' on' : '') + (edit ? '' : ' ro')}
-                  onClick={edit ? () => onPatch({ state: s.key }) : undefined}
-                >
-                  <i style={{ background: s.color }} />
-                  {s.label}
-                </span>
-              )
-            })}
+            {statuses.map((s) => (
+              <span
+                key={s.key}
+                className={'chip' + (s.key === (node.state || statuses[0]?.key) ? ' on' : '') + (edit ? '' : ' ro')}
+                onClick={edit ? () => onPatch({ state: s.key }) : undefined}
+              >
+                <i style={{ background: s.color }} />
+                {s.label}
+              </span>
+            ))}
           </div>
+          {stats.checks.total ? (
+            <span className="mcount">
+              材料 {stats.checks.done}/{stats.checks.total}
+            </span>
+          ) : null}
         </div>
-
-        {fields.map((f, i) => {
-          const typeLabel = FIELD_TYPES.find((t) => t.type === (f.type || 'text'))?.label || ''
-          const label = (f.label || '').trim()
-          const showLabel = edit || (label !== '' && label !== typeLabel)
-          return (
-            <div className="dfield" key={node.id + ':' + i}>
-              {showLabel ? (
-                <div className="fl">
-                  {edit ? (
-                    <input
-                      className="fname"
-                      defaultValue={f.label}
-                      key={node.id + ':' + i + ':' + f.label}
-                      placeholder="字段名"
-                      onBlur={(e) => renameField(i, e.target.value)}
-                    />
-                  ) : (
-                    <span className="flabel">{label}</span>
-                  )}
-                  {edit ? (
-                    <>
-                      <select
-                        className="ftype"
-                        value={f.type || 'text'}
-                        onChange={(e) => retypeField(i, e.target.value)}
-                        title="换类型（旧值会尽量带过去）"
-                      >
-                        {FIELD_TYPES.map((t) => (
-                          <option key={t.type} value={t.type}>
-                            {t.label}
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        className="mini"
-                        disabled={i === 0}
-                        onClick={() => moveField(i, -1)}
-                        title="上移"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        className="mini"
-                        disabled={i === fields.length - 1}
-                        onClick={() => moveField(i, 1)}
-                        title="下移"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        className="mini danger"
-                        onClick={() => deleteField(i)}
-                        title="删除字段"
-                      >
-                        ✕
-                      </button>
-                    </>
-                  ) : null}
-                </div>
-              ) : null}
-              {edit ? (
-                <FieldEdit
-                  field={f}
-                  project={project}
-                  nodeId={node.id}
-                  onChange={(v, extra) => putField(i, v, extra)}
-                  onError={onToast}
-                />
-              ) : (
-                <FieldView field={f} project={project} />
-              )}
-            </div>
-          )
-        })}
 
         {edit ? (
           <>
-            <button className="addfield" onClick={() => setPicking((v) => !v)}>
-              ＋ 添加字段
-            </button>
-            {picking ? (
-              <div className="typemenu">
-                {FIELD_TYPES.map((t) => (
-                  <button key={t.type} onClick={() => addField(t.type)}>
-                    <b>{t.label}</b>
-                    <span>{t.hint}</span>
-                  </button>
-                ))}
-              </div>
-            ) : null}
+            <div className="mdtools">
+              <button title="加粗 Ctrl+B" onClick={() => wrap('**')}>
+                <b>B</b>
+              </button>
+              <button title="标题" onClick={() => insert('\n## ')}>
+                H
+              </button>
+              <button title="列表" onClick={() => insert('\n- ')}>
+                • 列表
+              </button>
+              <button title="勾选清单" onClick={() => insert('\n- [ ] ')}>
+                ☑ 清单
+              </button>
+              <button
+                title="表格"
+                onClick={() => insert('\n| 项目 | 金额 |\n| --- | --- |\n|  |  |\n')}
+              >
+                ▦ 表格
+              </button>
+              <button title="插入文件" onClick={() => fileRef.current?.click()}>
+                📎 文件
+              </button>
+              <span className="sp" />
+              <span className="mhint">Ctrl+/ 预览</span>
+            </div>
+            <textarea
+              ref={taRef}
+              className="md"
+              value={body}
+              spellCheck={false}
+              onChange={(e) => onPatch({ body: e.target.value })}
+              onKeyDown={onKeyDown}
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(e) => {
+                const fs = Array.from(e.dataTransfer?.files || [])
+                if (fs.length) {
+                  e.preventDefault()
+                  void addFiles(fs)
+                }
+              }}
+              onPaste={(e) => {
+                const fs = Array.from(e.clipboardData.files || [])
+                if (fs.length) {
+                  e.preventDefault()
+                  void addFiles(fs)
+                }
+              }}
+              placeholder={'写这一步要做什么…\n\n要交的材料：\n- [ ] 合同\n- [ ] 发票'}
+            />
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const fs = Array.from(e.target.files || [])
+                e.target.value = ''
+                void addFiles(fs)
+              }}
+            />
           </>
-        ) : null}
+        ) : (
+          <div
+            className="mdview"
+            dangerouslySetInnerHTML={{
+              __html: mdToHtml(body, {
+                resolve: (rel) => embeds[rel] || (isDesktop ? '' : fileUrl(project, rel)),
+              }),
+            }}
+          />
+        )}
       </div>
     </aside>
   )
 }
+

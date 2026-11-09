@@ -35,6 +35,7 @@ import {
 } from './storage'
 import { isImageFile, uploadFile } from './assets'
 import { buildExportHtml } from './exporter'
+import { bodyOf, fieldsToMarkdown } from './migrate'
 
 const nodeTypes = { card: CardNode }
 
@@ -214,14 +215,22 @@ function Editor() {
         setProject(name)
         setStatuses(st)
         setNodes(
-          (doc.nodes || []).map((n) => ({
-            id: n.id,
-            type: 'card',
-            zIndex: 2,
-            position: { x: n.x, y: n.y },
-            data: { node: n },
-            style: { width: CARD_W, height: CARD_H },
-          })),
+          (doc.nodes || []).map((raw) => {
+            const n = { ...raw } as any
+            // 老数据：字段一次性转成 Markdown 正文
+            if (!n.body && Array.isArray(n.fields) && n.fields.length) {
+              n.body = fieldsToMarkdown(n)
+            }
+            delete n.fields
+            return {
+              id: n.id,
+              type: 'card',
+              zIndex: 2,
+              position: { x: n.x, y: n.y },
+              data: { node: n },
+              style: { width: CARD_W, height: CARD_H },
+            }
+          }),
         )
         setEdges(
           (doc.edges || []).map((e, i) => ({
@@ -446,48 +455,28 @@ function Editor() {
 
   const baseName = (rel: string) => (rel.split(/[\\/]/).pop() || rel).replace(/\.[^.]+$/, '')
 
-  // 拖文件 / 粘截图 / 选文件 三条路都走这里
+  // 拖文件 / 粘截图 / 选文件 三条路都走这里：上传后把 ![[...]] 追加到正文
   const addFilesToNode = useCallback(
     async (nodeId: string, files: File[]) => {
       if (!files.length) return
       const cur = nodesRef.current.find((n) => n.id === nodeId)
       if (!cur) return
       const node = (cur.data as any).node as FlowNode
-      const fields = (node.fields || []).slice()
-      const imgs = files.filter(isImageFile)
-      const others = files.filter((f) => !isImageFile(f))
-
-      const pushTo = async (type: 'image' | 'attachment', list: File[]) => {
-        if (!list.length) return
-        let idx = fields.findIndex((f) => f.type === type)
-        if (idx < 0) {
-          fields.push({ type, label: type === 'image' ? '图片' : '附件', value: [] })
-          idx = fields.length - 1
+      const lines: string[] = []
+      for (const f of files) {
+        try {
+          const saved = await uploadFile(project, nodeId, f)
+          lines.push(`![[${saved.rel}]]`)
+        } catch (e: any) {
+          setMsg('上传失败：' + (e?.message || e))
         }
-        const arr: any[] = Array.isArray(fields[idx].value) ? [...fields[idx].value] : []
-        for (const f of list) {
-          try {
-            const saved = await uploadFile(project, nodeId, f)
-            if (type === 'image') arr.push(saved.rel)
-            else
-              arr.push({
-                name: baseName(saved.rel),
-                file: saved.rel,
-                done: true,
-                size: saved.size,
-              })
-          } catch (e: any) {
-            setMsg('上传失败：' + (e?.message || e))
-          }
-        }
-        fields[idx] = { ...fields[idx], value: arr }
       }
-
-      await pushTo('image', imgs)
-      await pushTo('attachment', others)
-      patch(nodeId, { fields })
+      if (!lines.length) return
+      const body = `${bodyOf(node)}\n\n${lines.join('\n')}`.trim()
+      patch(nodeId, { body })
       setSelId(nodeId)
-      setMsg(`已添加 ${files.length} 个文件`)
+      setMode('edit')
+      setMsg(`已插入 ${lines.length} 个文件`)
     },
     [patch, project],
   )

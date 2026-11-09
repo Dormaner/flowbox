@@ -2,6 +2,8 @@ import type { Doc, FlowNode, Status } from './types'
 import { fieldText, normList, optionsOf, parseLink } from './fields'
 import { CARD_H, CARD_W, edgePath, pathMid } from './geometry'
 import { fileDataUrl } from './storage'
+import { mdStats, mdToHtml } from './markdown'
+import { bodyOf } from './migrate'
 
 const esc = (s: any) =>
   String(s ?? '')
@@ -208,6 +210,29 @@ main.drag{cursor:grabbing}
  color:#fff;background:rgba(17,24,39,.62);padding:1px 7px;border-radius:6px;overflow:hidden;
  text-overflow:ellipsis;white-space:nowrap}
 .vbtn.ghost{background:#eef2ff;color:#1e40af;cursor:default}
+
+/* 正文 Markdown */
+.mdview{font-size:13px;line-height:1.75}
+.mdview h2{font-size:14.5px;margin:14px 0 4px;padding-bottom:2px;border-bottom:1px solid #f0f2f5}
+.mdview h3{font-size:13.5px;margin:12px 0 3px}
+.mdview p{margin:6px 0}
+.mdview ul,.mdview ol{margin:4px 0;padding-left:18px}
+.mdview li{margin:2px 0}
+.mdview li.task{list-style:none;display:flex;gap:7px;align-items:flex-start;margin-left:-14px}
+.mdview li.task .box{flex:0 0 auto;width:14px;height:14px;margin-top:3px;border:1px solid #cfd6df;
+ border-radius:4px;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff}
+.mdview li.task.done .box{background:#16a34a;border-color:#16a34a}
+.mdview li.task.done .tx{color:#9aa1aa;text-decoration:line-through}
+.mdview blockquote{margin:6px 0;padding:4px 10px;border-left:3px solid #e3e5e8;color:#6b7280}
+.mdview table.md-table{border-collapse:collapse;margin:6px 0;font-size:12.5px}
+.mdview .md-table th,.mdview .md-table td{border:1px solid #e6e8eb;padding:3px 8px}
+.mdview .md-table th{background:#f9fafb;font-weight:600}
+.mdview code{background:#f2f3f5;border-radius:4px;padding:0 4px;font-size:12px}
+.mdview pre.md-code{background:#f7f8fa;border:1px solid #eef0f2;border-radius:8px;padding:8px;overflow:auto;font-size:12px}
+.mdview .md-img{display:block;max-width:100%;margin:8px 0;border:1px solid #e6e8eb;border-radius:8px}
+.mdview .md-file{display:inline-block;margin:2px 0;font-size:12.5px;color:#2563eb;text-decoration:none}
+.mdview .md-miss{font-size:12px;color:#b91c1c}
+.mdview a{color:#2563eb}
 .mk{width:16px;text-align:center;color:#b9c0cb;flex:0 0 auto}
 .mk.ok{color:#15803d}
 .an{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -322,9 +347,12 @@ export async function buildExportHtml(
   const tpls = nodes
     .map((n, i) => {
       const st = stOf(n)
-      const fields = (n.fields || []).map((f) => fieldHtml(f, images)).join('')
+      const body = bodyOf(n)
+      const html = body.trim()
+        ? mdToHtml(body, { resolve: (rel) => images[rel] || '' })
+        : (n.fields || []).map((f) => fieldHtml(f, images)).join('')
       const sum = n.summary ? `<div class="psum">${esc(n.summary)}</div>` : ''
-      return `<template id="t${i}"><div class="ptitle">${esc(n.name || '未命名')}</div>${sum}<span class="chip"><i style="background:${esc(st?.color || '#C7CBD1')}"></i>${esc(st?.label || '')}</span>${fields}</template>`
+      return `<template id="t${i}"><div class="ptitle">${esc(n.name || '未命名')}</div>${sum}<span class="chip"><i style="background:${esc(st?.color || '#C7CBD1')}"></i>${esc(st?.label || '')}</span><div class="mdview">${html}</div></template>`
     })
     .join('')
 
