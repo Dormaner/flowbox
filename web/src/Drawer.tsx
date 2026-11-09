@@ -53,6 +53,8 @@ type Props = {
   pos: { x: number; y: number }
   onPos: (p: { x: number; y: number }) => void
   onPatch: (patch: Partial<FlowNode>) => void
+  onPromote: () => void
+  onSplit: () => void
   onClose: () => void
   onToast: (msg: string) => void
 }
@@ -72,6 +74,8 @@ export default function Drawer({
   pos,
   onPos,
   onPatch,
+  onPromote,
+  onSplit,
   onClose,
   onToast,
 }: Props) {
@@ -79,6 +83,8 @@ export default function Drawer({
   const n: FlowNode = node || ({ id: '', name: '', fields: [] } as unknown as FlowNode)
   const body = bodyOf(n)
   const stats = mdStats(body)
+  const taskCount = (body.match(/^\s*[-*]\s+\[( |x|X)\]\s+/gm) || []).length
+  const secCount = (body.match(/^##\s+/gm) || []).length
   const embeds = useEmbeds(project, body)
   const taRef = useRef<HTMLTextAreaElement>(null)
   const fileRef = useRef<HTMLInputElement>(null)
@@ -333,6 +339,20 @@ export default function Drawer({
               <button title="插入文件" onClick={() => fileRef.current?.click()}>
                 📎 文件
               </button>
+              {taskCount >= 1 ? (
+                <button
+                  id="m-promote"
+                  title="把勾选清单的每一项变成一张卡片"
+                  onClick={onPromote}
+                >
+                  ⇥ 清单升卡
+                </button>
+              ) : null}
+              {secCount >= 2 ? (
+                <button id="m-split" title="按 ## 小节拆成多张卡片" onClick={onSplit}>
+                  ⧉ 按小节拆
+                </button>
+              ) : null}
               <span className="sp" />
               <span className="mhint">Ctrl+/ 预览</span>
             </div>

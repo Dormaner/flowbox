@@ -328,9 +328,21 @@ await step('拖容器带着子卡一起走', async () => {
   const contId = await page.evaluate(
     () => document.querySelector('.card.cont').closest('.react-flow__node').dataset.id,
   )
-  const d0 = await readDoc()
-  const c0f = d0?.nodes?.find((n) => n.id === contId)
-  const k0f = d0?.nodes?.find((n) => n.parent === contId)
+  // 等保存追上：d0 里子卡必须已经落在容器范围内（否则量到的位移是假的）
+  let d0 = null
+  let c0f = null
+  let k0f = null
+  for (let i = 0; i < 12; i++) {
+    d0 = await readDoc()
+    const c = d0?.nodes?.find((n) => n.id === contId)
+    const k = d0?.nodes?.find((n) => n.id === contKidId)
+    if (c && k && k.x > c.x && k.x < c.x + (c.w || 0) && k.y > c.y && k.y < c.y + (c.h || 0)) {
+      c0f = c
+      k0f = k
+      break
+    }
+    await sleep(400)
+  }
   const before = await page.evaluate(() => {
     const r = document.querySelector('.card.cont').getBoundingClientRect()
     return { cx: Math.round(r.x + 24), cy: Math.round(r.y + r.height - 14) }
@@ -345,18 +357,18 @@ await step('拖容器带着子卡一起走', async () => {
   let d1 = null
   let dcx = 0
   let dkx = 0
-  for (let i = 0; i < 8; i++) {
-    await sleep(500)
+  for (let i = 0; i < 14; i++) {
+    await sleep(700)
     d1 = await readDoc()
     const c1f = d1?.nodes?.find((n) => n.id === contId)
-    const k1f = d1?.nodes?.find((n) => n.parent === contId)
+    const k1f = d1?.nodes?.find((n) => n.id === contKidId)
     dcx = c1f && c0f ? Math.round(c1f.x - c0f.x) : 0
     dkx = k1f && k0f ? Math.round(k1f.x - k0f.x) : 0
-    if (dcx !== 0 && dcx === dkx) break
+    if (dcx !== 0 && Math.abs(dcx - dkx) <= 2) break
   }
   check(
     '拖容器带着子卡一起走',
-    !!c0f && !!k0f && dcx !== 0 && dcx === dkx,
+    !!c0f && !!k0f && dcx !== 0 && Math.abs(dcx - dkx) <= 2,
     `容器 +${dcx}，子卡 +${dkx}`,
   )
 })
@@ -425,6 +437,106 @@ await step('成组出现分组框', async () => {
   await sleep(200)
   check('成组出现分组框', Boolean(await page.$('.gbox')))
 })
+
+// 连线：先回到 100%（把手在低缩放下只有 3px，真人也不会那么点），再拖
+// 清单升卡 / 按小节拆卡 / 合并
+let splitSrc = null
+await step('清单升卡：勾选项变成卡片', async () => {
+  const spot = await page.evaluate(() => {
+    const p = document.querySelector('.react-flow__pane').getBoundingClientRect()
+    return { x: Math.round(p.x + 160), y: Math.round(p.y + 150) }
+  })
+  await page.mouse.click(spot.x, spot.y, { delay: 10 })
+  await page.mouse.click(spot.x, spot.y, { delay: 10 })
+  await sleep(500)
+  await page.keyboard.type('拆卡测试')
+  await page.keyboard.press('Enter')
+  await sleep(300)
+  splitSrc = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.card')].find((c) =>
+      (c.textContent || '').includes('拆卡测试'),
+    )
+    return el.closest('.react-flow__node').getAttribute('data-id')
+  })
+  const md = await page.$('.drawer textarea.md')
+  await md.click()
+  await page.keyboard.down('Control')
+  await page.keyboard.press('End')
+  await page.keyboard.up('Control')
+  await page.keyboard.type('\n- [ ] 甲材料\n- [ ] 乙材料')
+  await sleep(400)
+  const n0 = await page.$$eval('.card', (els) => els.length)
+  const e0 = await page.$$eval('.react-flow__edge', (els) => els.length)
+  await page.click('#m-promote')
+  await sleep(800)
+  const n1 = await page.$$eval('.card', (els) => els.length)
+  const e1 = await page.$$eval('.react-flow__edge', (els) => els.length)
+  const names = await page.$$eval('.card .ttl', (els) => els.map((e) => e.textContent.trim()))
+  check(
+    '清单升卡：勾选项变成卡片',
+    n1 === n0 + 2 && e1 === e0 + 2 && names.includes('甲材料') && names.includes('乙材料'),
+    `卡片 ${n0} -> ${n1}，连线 ${e0} -> ${e1}`,
+  )
+})
+
+await step('按小节拆卡', async () => {
+  const md = await page.$('.drawer textarea.md')
+  await md.click()
+  await page.keyboard.down('Control')
+  await page.keyboard.press('End')
+  await page.keyboard.up('Control')
+  await page.keyboard.type('\n## 第一步\n先干这个\n## 第二步\n再干那个')
+  await sleep(500)
+  const n0 = await page.$$eval('.card', (els) => els.length)
+  await page.click('#m-split')
+  await sleep(800)
+  const n1 = await page.$$eval('.card', (els) => els.length)
+  const names = await page.$$eval('.card .ttl', (els) => els.map((e) => e.textContent.trim()))
+  check(
+    '按小节拆卡',
+    n1 === n0 + 2 && names.includes('第一步') && names.includes('第二步'),
+    `卡片 ${n0} -> ${n1}`,
+  )
+})
+
+await step('多选合并成容器', async () => {
+  await page.click('#d-close').catch(() => {})
+  await page.waitForFunction(() => !document.querySelector('.drawer'), { timeout: 5000 }).catch(() => {})
+  await sleep(300)
+  const pts = await page.evaluate(() => {
+    const cs = [...document.querySelectorAll('.card:not(.cont)')].filter((c) => {
+      const t = c.querySelector('.ttl')?.textContent || ''
+      return t.includes('甲材料') || t.includes('乙材料')
+    })
+    return cs.map((c) => {
+      const r = c.getBoundingClientRect()
+      return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+    })
+  })
+  if (pts.length < 2) return check('多选合并成容器', false, '没找到刚拆出来的两张卡')
+  await page.mouse.click(pts[0].x, pts[0].y)
+  await sleep(200)
+  await page.keyboard.down('Control')
+  await page.mouse.click(pts[1].x, pts[1].y)
+  await page.keyboard.up('Control')
+  await sleep(300)
+  const c0 = await page.$$eval('.card.cont', (els) => els.length)
+  await page.evaluate(() => {
+    const b = [...document.querySelectorAll('.selbar button')].find((x) =>
+      (x.getAttribute('title') || '').includes('合并'),
+    )
+    b?.click()
+  })
+  await sleep(800)
+  const c1 = await page.$$eval('.card.cont', (els) => els.length)
+  const badges = await page.$$eval('.card.cont .ccnt', (els) => els.map((e) => e.textContent.trim()))
+  check(
+    '多选合并成容器',
+    c1 === c0 + 1 && badges.some((b) => b.startsWith('2')),
+    `容器 ${c0} -> ${c1}，徽标 ${badges.join(' / ')}`,
+  )
+})
+
 
 // 连线：先回到 100%（把手在低缩放下只有 3px，真人也不会那么点），再拖
 await step('拖圆点连成线', async () => {

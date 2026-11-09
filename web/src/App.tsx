@@ -490,6 +490,169 @@ function Editor() {
     setDirty(true)
   }, [pushHistory, rf, setNodes])
 
+  /** 通用：在 src 右边竖着排一批新卡片，并从 src 连过去 */
+  const spawnCards = (
+    srcId: string,
+    items: { name: string; body: string; done?: boolean }[],
+    msg: string,
+  ) => {
+    const src = nodesRef.current.find((n) => n.id === srcId)
+    if (!src || !items.length) return
+    pushHistory()
+    const x = Math.round(src.position.x + (src.width || DEFAULT_W) + 90)
+    let y = Math.round(src.position.y)
+    const doneKey = statusesRef.current.find((s) => s.key === 'done')?.key
+    const rf: any[] = []
+    items.forEach((it) => {
+      const nid = 'n' + Math.random().toString(16).slice(2, 10)
+      const node: FlowNode = {
+        id: nid,
+        name: it.name.slice(0, 40) || '新卡片',
+        summary: '',
+        body: it.body,
+        x,
+        y,
+        state: it.done && doneKey ? doneKey : statusesRef.current[0]?.key || 'todo',
+        fields: [],
+      }
+      rf.push({
+        id: nid,
+        type: 'card',
+        position: { x, y },
+        data: { node },
+        width: cardWidth(node),
+        height: cardHeight(node),
+        zIndex: 2,
+      })
+      y += cardHeight(node) + 26
+    })
+    setNodes((ns) => [...ns, ...rf])
+    setEdges((es) => [
+      ...es,
+      ...rf.map((r) => ({
+        id: 'e' + Math.random().toString(16).slice(2, 8),
+        source: srcId,
+        target: r.id,
+        type: 'fb',
+        data: { label: '' },
+      })),
+    ])
+    setDirty(true)
+    setMsg(msg)
+  }
+
+  /** 清单升卡：把正文里的 - [ ] 勾选项各变成一张卡，原卡里删掉这些行 */
+  const promoteChecklist = (id: string) => {
+    const rfNode = nodesRef.current.find((n) => n.id === id)
+    if (!rfNode) return
+    const node = (rfNode.data as any).node as FlowNode
+    const lines = bodyOf(node).split('\n')
+    const items: { name: string; body: string; done: boolean; line: number }[] = []
+    lines.forEach((l, i) => {
+      const m = /^\s*[-*]\s+\[( |x|X)\]\s+(.*)$/.exec(l)
+      if (!m) return
+      const raw = m[2].trim()
+      const embeds = [...raw.matchAll(/!\[\[[^\]]+\]\]/g)].map((x) => x[0])
+      const text = raw.replace(/!\[\[[^\]]+\]\]/g, '').replace(/\s+/g, ' ').trim()
+      items.push({
+        name: text || '材料',
+        body: [text, ...embeds].filter(Boolean).join('\n\n'),
+        done: m[1].toLowerCase() === 'x',
+        line: i,
+      })
+    })
+    if (!items.length) {
+      setMsg('这张卡里没有勾选清单（- [ ] 开头的一行）')
+      return
+    }
+    const keep = lines
+      .filter((_, i) => !items.some((it) => it.line === i))
+      .join('\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim()
+    patch(id, { body: keep || `已拆成 ${items.length} 张卡片` })
+    spawnCards(
+      id,
+      items.map((it) => ({ name: it.name, body: it.body, done: it.done })),
+      `清单升卡：拆出 ${items.length} 张`,
+    )
+  }
+
+  /** 按小节拆卡：把每个 ## 小节变成一张卡 */
+  const splitSections = (id: string) => {
+    const rfNode = nodesRef.current.find((n) => n.id === id)
+    if (!rfNode) return
+    const node = (rfNode.data as any).node as FlowNode
+    const body = bodyOf(node)
+    const lines = body.split('\n')
+    const heads = lines.map((l, i) => (/^##\s+/.test(l) ? i : -1)).filter((i) => i >= 0)
+    if (heads.length < 2) {
+      setMsg('正文里至少要两个 “## 小节” 才能拆')
+      return
+    }
+    const secs = heads.map((h, k) => {
+      const end = k + 1 < heads.length ? heads[k + 1] : lines.length
+      return {
+        name: lines[h].replace(/^##\s+/, '').trim() || '小节',
+        body: lines
+          .slice(h + 1, end)
+          .join('\n')
+          .trim(),
+      }
+    })
+    const pre = lines.slice(0, heads[0]).join('\n').trim()
+    patch(id, { body: pre || `${node.name}（已拆成 ${secs.length} 个小节）` })
+    spawnCards(id, secs, `按小节拆出 ${secs.length} 张`)
+  }
+
+  /** 合并：把选中的卡片装进一个新容器，成为它的子卡 */
+  const mergeSelected = () => {
+    const sel = nodesRef.current.filter((n) => n.selected)
+    if (sel.length < 2) {
+      setMsg('先选中两张以上卡片')
+      return
+    }
+    const name = window.prompt('合并后的名字', '合并分组')
+    if (name === null) return
+    pushHistory()
+    const x1 = Math.round(Math.min(...sel.map((n) => n.position.x)) - 26)
+    const y1 = Math.round(Math.min(...sel.map((n) => n.position.y)) - 50)
+    const x2 = Math.round(Math.max(...sel.map((n) => n.position.x + (n.width || DEFAULT_W))) + 26)
+    const y2 = Math.round(Math.max(...sel.map((n) => n.position.y + (n.height || 90))) + 26)
+    const id = 'c' + Math.random().toString(16).slice(2, 10)
+    const cont: FlowNode = {
+      id,
+      name: name.trim() || '合并分组',
+      summary: '',
+      x: x1,
+      y: y1,
+      w: x2 - x1,
+      h: y2 - y1,
+      kind: 'container',
+      state: statusesRef.current[0]?.key || 'todo',
+      fields: [],
+    }
+    const ids = new Set(sel.map((n) => n.id))
+    setNodes((ns) => [
+      {
+        id,
+        type: 'card',
+        position: { x: x1, y: y1 },
+        data: { node: cont },
+        width: cardWidth(cont),
+        height: cardHeight(cont),
+        zIndex: 0,
+      },
+      ...ns.map((n) =>
+        ids.has(n.id)
+          ? { ...n, zIndex: 3, data: { ...n.data, node: { ...(n.data as any).node, parent: id } } }
+          : n,
+      ),
+    ])
+    setDirty(true)
+    setMsg(`已合并 ${sel.length} 张卡片`)
+  }
+
   const addNext = useCallback(
     (fromId: string) => {
       const src = nodesRef.current.find((n) => n.id === fromId)
@@ -1094,6 +1257,9 @@ function Editor() {
                   <span className="sep" />
                   <button onClick={groupSelected} title="把选中的卡片装进一个分组框">成组</button>
                   <button onClick={ungroupSelected} title="拆掉选中卡片所在的分组">解组</button>
+                  <button onClick={mergeSelected} title="合并成一个容器卡，选中的卡片变成它的子卡">
+                    合并
+                  </button>
                   <span className="cnt">{selected.length} 张</span>
                 </Panel>
               ) : null}
@@ -1174,6 +1340,8 @@ function Editor() {
               pos={drawerPos}
               onPos={setDrawerPos}
               onPatch={(p) => drawerNode && patch(drawerNode.id, p)}
+              onPromote={() => drawerNode && promoteChecklist(drawerNode.id)}
+              onSplit={() => drawerNode && splitSections(drawerNode.id)}
               onClose={() => {
                 setSelId(null)
                 setLastId(null)
