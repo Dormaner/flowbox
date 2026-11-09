@@ -16,8 +16,10 @@ export type FlowNode = {
   state?: string
   /** 卡片正文（Markdown）：新模型的主内容 */
   body?: string
-  /** 卡片宽度（170 / 220 / 300），高度按内容自动算 */
+  /** 卡片宽度（默认 220，可拖边角自由改） */
   w?: number
+  /** 卡片高度（不设 = 按内容自适应） */
+  h?: number
   /** 老数据：字段数组，加载时会转成 body */
   fields?: Field[]
 }

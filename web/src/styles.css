@@ -776,6 +776,53 @@ button:hover:disabled { background: transparent; }
 .mdview .md-miss { font-size: 12px; color: #b91c1c; }
 .mdview a { color: var(--accent); }
 .mcount { margin-left: auto; font-size: 11px; color: #8a94a6; white-space: nowrap; }
+
+/* 卡片尺寸 */
+.msize {
+  font-size: 11.5px;
+  color: #4b5563;
+  font-variant-numeric: tabular-nums;
+  background: #f3f5f8;
+  border-radius: 6px;
+  padding: 2px 7px;
+}
+.mini-btn {
+  border: 1px solid var(--line);
+  background: #fff;
+  border-radius: 7px;
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+  color: #4b5563;
+}
+.mini-btn:hover { border-color: #c3cbd6; color: var(--accent); }
+
+/* 详情栏没选中卡片时的空状态 */
+.dempty {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  height: 220px;
+  color: #9aa1aa;
+  font-size: 13px;
+  text-align: center;
+}
+.dempty span { font-size: 11.5px; color: #c0c6cf; }
+
+/* 拖边角改大小 */
+.react-flow__resize-control.line.nl { border-color: var(--accent); border-width: 1px; }
+.react-flow__resize-control.handle.nh {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  background: #fff;
+  border: 1.5px solid var(--accent);
+}
+
+/* 详情栏顶部的按钮 */
+.dh button.on { background: #eef2ff; color: var(--accent); border-radius: 6px; }
 .guide { position: absolute; background: #f43f5e; z-index: 6; pointer-events: none; }
 .guide.v { width: 1px; }
 .guide.h { height: 1px; }

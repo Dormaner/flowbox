@@ -1,8 +1,9 @@
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { Handle, NodeResizer, Position, type NodeProps } from '@xyflow/react'
 import { HoverCtx } from './hover'
 import { bodyOf } from './migrate'
 import { mdStats } from './markdown'
+import { MAX_H, MAX_W, MIN_H, MIN_W } from './layout'
 import type { FlowNode, Status } from './types'
 
 type Ctx = {
@@ -10,6 +11,7 @@ type Ctx = {
   mode: 'edit' | 'view'
   patch: (id: string, patch: Partial<FlowNode>) => void
   cycleState: (id: string) => void
+  resize: (id: string, w: number, h: number) => void
 }
 
 export const EditorCtx = createContext<Ctx>({
@@ -17,6 +19,7 @@ export const EditorCtx = createContext<Ctx>({
   mode: 'edit',
   patch: () => {},
   cycleState: () => {},
+  resize: () => {},
 })
 
 // 新建卡片只自动进一次改名，撤销 / 重做时不要又弹出来
@@ -58,7 +61,6 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
 
   const start = (which: 'title' | 'sum') => (e: React.MouseEvent) => {
     e.stopPropagation()
-    if (ctx.mode !== 'edit') return
     setDraft(which === 'title' ? n.name || '' : n.summary || '')
     setEditing(which)
   }
@@ -84,19 +86,30 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
   }
 
   return (
-    <div
-      className={`card${selected ? ' sel' : ''}`}
-      onMouseEnter={() => setHover(id)}
-      onMouseLeave={() => setHover(null)}
-    >
+    <>
+      <NodeResizer
+        isVisible={!!selected}
+        minWidth={MIN_W}
+        minHeight={MIN_H}
+        maxWidth={MAX_W}
+        maxHeight={MAX_H}
+        lineClassName="nl"
+        handleClassName="nh"
+        onResizeEnd={(_e, p) => ctx.resize(id, p.width, p.height)}
+      />
+      <div
+        className={`card${selected ? ' sel' : ''}`}
+        onMouseEnter={() => setHover(id)}
+        onMouseLeave={() => setHover(null)}
+      >
       <i
         className="dot"
         style={{ background: color }}
-        title={st?.label || '状态'}
+        title={(st?.label || '状态') + '（点一下切换）'}
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
-          if (ctx.mode === 'edit') ctx.cycleState(id)
+          ctx.cycleState(id)
         }}
       />
       {editing === 'title' ? (
@@ -147,7 +160,8 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
 
       <Handle type="target" position={Position.Left} className="port left" />
       <Handle type="source" position={Position.Right} className="port right" />
-    </div>
+      </div>
+    </>
   )
 }
 

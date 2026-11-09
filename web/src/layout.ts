@@ -2,20 +2,27 @@ import type { FlowNode } from './types'
 import { bodyOf } from './migrate'
 import { mdStats } from './markdown'
 
-/** 宽度三档：窄 / 标准 / 宽 */
-export const WIDTHS = [170, 220, 300]
+/** 卡片默认宽度；高度不设时按内容算 */
 export const DEFAULT_W = 220
+export const DEFAULT_H = 88
+export const MIN_W = 150
+export const MIN_H = 56
+export const MAX_W = 900
+export const MAX_H = 900
 
 export function cardWidth(node: FlowNode): number {
   const w = Number(node.w) || DEFAULT_W
-  return Math.max(150, Math.min(420, w))
+  return Math.max(MIN_W, Math.min(MAX_W, w))
 }
 
 /**
- * 高度按内容估：标题（最多 2 行）+ 摘要 1 行 + 小字标签 1 行。
+ * 高度：用户拖过就用用户的；没拖过按内容估
+ * （标题最多 2 行 + 摘要 1 行 + 小字标签 1 行）
  * 画布和导出都用这一个函数，保证两边长得一样。
  */
 export function cardHeight(node: FlowNode): number {
+  if (Number(node.h) > 0) return Math.max(MIN_H, Math.min(MAX_H, Number(node.h)))
+
   const inner = cardWidth(node) - 24
   const perLine = Math.max(6, Math.floor(inner / 13))
   const titleLen = [...String(node.name || '未命名')].length

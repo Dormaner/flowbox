@@ -39,11 +39,13 @@ function useEmbeds(project: string, body: string) {
 }
 
 type Props = {
-  node: FlowNode
+  node: FlowNode | null
   statuses: Status[]
   project: string
   mode: 'edit' | 'view'
   onMode: (m: 'edit' | 'view') => void
+  pin: boolean
+  onTogglePin: () => void
   width: number
   onWidth: (w: number) => void
   float: boolean
@@ -61,6 +63,8 @@ export default function Drawer({
   project,
   mode,
   onMode,
+  pin,
+  onTogglePin,
   width,
   onWidth,
   float,
@@ -72,7 +76,8 @@ export default function Drawer({
   onToast,
 }: Props) {
   const edit = mode === 'edit'
-  const body = bodyOf(node)
+  const n: FlowNode = node || ({ id: '', name: '', fields: [] } as unknown as FlowNode)
+  const body = bodyOf(n)
   const stats = mdStats(body)
   const embeds = useEmbeds(project, body)
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -81,7 +86,7 @@ export default function Drawer({
   /** 在光标处插入一段文字 */
   const insert = (text: string) => {
     const ta = taRef.current
-    const cur = bodyOf(node)
+    const cur = body
     if (!ta) {
       onPatch({ body: `${cur}\n${text}`.trim() })
       return
@@ -101,7 +106,7 @@ export default function Drawer({
     const lines: string[] = []
     for (const f of files) {
       try {
-        const saved = await uploadFile(project, node.id, f)
+        const saved = await uploadFile(project, n.id, f)
         lines.push(`![[${saved.rel}]]`)
       } catch (e: any) {
         onToast(e?.message || String(e))
@@ -113,6 +118,7 @@ export default function Drawer({
   const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.ctrlKey || e.metaKey) && e.key === '/') {
       e.preventDefault()
+      e.stopPropagation() // 别让 App 的全局快捷键再翻一次
       onMode(edit ? 'view' : 'edit')
       return
     }
@@ -134,7 +140,7 @@ export default function Drawer({
   const wrap = (mark: string) => {
     const ta = taRef.current
     if (!ta) return
-    const cur = bodyOf(node)
+    const cur = body
     const s = ta.selectionStart ?? 0
     const e2 = ta.selectionEnd ?? 0
     const sel = cur.slice(s, e2) || (mark === '**' ? '加粗文字' : 'code')
@@ -147,7 +153,7 @@ export default function Drawer({
   }
 
   const toggleTask = (index: number) => {
-    const lines = bodyOf(node).split('\n')
+    const lines = body.split('\n')
     let n = -1
     for (let i = 0; i < lines.length; i++) {
       if (/^\s*[-*]\s+\[( |x|X)\]/.test(lines[i])) {
@@ -197,6 +203,38 @@ export default function Drawer({
     window.addEventListener('pointerup', up)
   }
 
+  if (!node) {
+    return (
+      <aside className={'drawer' + (float ? ' float' : '')} style={{ width, ...(float ? { left: pos.x, top: pos.y } : {}) }}>
+        <div className="resizer" onPointerDown={startResize} title="拖动调宽" />
+        <div className="dh" onPointerDown={startDrag} style={{ cursor: float ? 'move' : 'default' }}>
+          <div className="modesw">
+            <button id="m-edit" className={edit ? 'on' : ''} onClick={() => onMode('edit')} title="Ctrl+/">
+              编辑
+            </button>
+            <button id="m-view" className={!edit ? 'on' : ''} onClick={() => onMode('view')} title="Ctrl+/">
+              预览
+            </button>
+          </div>
+          <span className="sp" />
+          <button id="d-pin" className={pin ? 'on' : ''} title="取消固定" onClick={onTogglePin}>
+            📌
+          </button>
+          <button title={float ? '停靠到右侧' : '浮动窗口'} onClick={onToggleFloat}>
+            {float ? '⇥' : '⧉'}
+          </button>
+          <button id="d-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="db">
+          <div className="dempty">
+            点一张卡片，这里显示它的正文
+            <span>拖边角改大小 · Ctrl+/ 切编辑与预览</span>
+          </div>
+        </div>
+      </aside>
+    )
+  }
+
   return (
     <aside
       className={'drawer' + (float ? ' float' : '')}
@@ -213,6 +251,14 @@ export default function Drawer({
           </button>
         </div>
         <span className="sp" />
+        <button
+          id="d-pin"
+          className={pin ? 'on' : ''}
+          title={pin ? '取消固定（不选卡片就收起）' : '固定在页面上（不选卡片也留着）'}
+          onClick={onTogglePin}
+        >
+          📌
+        </button>
         <button title={float ? '停靠到右侧' : '浮动窗口'} onClick={onToggleFloat}>
           {float ? '⇥' : '⧉'}
         </button>
@@ -223,12 +269,12 @@ export default function Drawer({
         {edit ? (
           <input
             className="dname"
-            defaultValue={node.name}
-            key={node.id + ':name'}
+            defaultValue={n.name}
+            key={n.id + ':name'}
             onBlur={(e) => onPatch({ name: e.target.value.trim() || '未命名' })}
           />
         ) : (
-          <div className="dname-ro">{node.name}</div>
+          <div className="dname-ro">{n.name}</div>
         )}
 
         <div className="drow">
@@ -237,7 +283,7 @@ export default function Drawer({
             {statuses.map((s) => (
               <span
                 key={s.key}
-                className={'chip' + (s.key === (node.state || statuses[0]?.key) ? ' on' : '') + (edit ? '' : ' ro')}
+                className={'chip' + (s.key === (n.state || statuses[0]?.key) ? ' on' : '') + (edit ? '' : ' ro')}
                 onClick={edit ? () => onPatch({ state: s.key }) : undefined}
               >
                 <i style={{ background: s.color }} />
@@ -253,25 +299,14 @@ export default function Drawer({
         </div>
 
         <div className="drow">
-          <span>宽度</span>
-          <div className="chips">
-            {[
-              [170, '窄'],
-              [220, '标准'],
-              [300, '宽'],
-            ].map(([w, label]) => (
-              <span
-                key={w}
-                className={
-                  'chip' + ((Number(node.w) || 220) === w ? ' on' : '') + (edit ? '' : ' ro')
-                }
-                onClick={edit ? () => onPatch({ w: Number(w) }) : undefined}
-              >
-                {label}
-              </span>
-            ))}
-          </div>
-          <span className="mcount">高度随内容</span>
+          <span>大小</span>
+          <span className="msize">
+            {Math.round(n.w || 220)} × {Math.round(n.h || 0) || '自动'}
+          </span>
+          <button className="mini-btn" onClick={() => onPatch({ w: undefined, h: undefined })}>
+            自适应
+          </button>
+          <span className="mcount">拖卡片边角随意改</span>
         </div>
 
         {edit ? (

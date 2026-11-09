@@ -108,6 +108,13 @@ function Editor() {
   const [nodes, setNodes, onNodesChange] = useNodesState<any>([])
   const [edges, setEdges, onEdgesChange] = useEdgesState<any>([])
   const [selId, setSelId] = useState<string | null>(null)
+  // 详情栏固定：不选卡片也不收起来，一直显示上一张
+  const [pin, setPinState] = useState(() => localStorage.getItem('fb.drawerPin') !== '0')
+  const [lastId, setLastId] = useState<string | null>(null)
+  const setPin = (v: boolean) => {
+    setPinState(v)
+    localStorage.setItem('fb.drawerPin', v ? '1' : '0')
+  }
   const [msg, setMsg] = useState('连上 bridge.py 才能读写项目')
   const [dirty, setDirty] = useState(false)
   const [zoom, setZoom] = useState(100)
@@ -139,6 +146,11 @@ function Editor() {
   modeRef.current = mode
   const selRef = useRef<string | null>(null)
   selRef.current = selId
+
+  // 记住最后选中的卡片：固定详情栏时用它兜底
+  useEffect(() => {
+    if (selId) setLastId(selId)
+  }, [selId])
 
   const past = useRef<string[]>([])
   const future = useRef<string[]>([])
@@ -183,16 +195,46 @@ function Editor() {
         ns.map((n) => {
           if (n.id !== id) return n
           const node = { ...(n.data as any).node, ...p }
+          // 没手动拖过高度就跟着内容走；拖过就保持用户的高度
           return {
             ...n,
             data: { ...n.data, node },
-            style: { width: cardWidth(node), height: cardHeight(node) },
+            width: cardWidth(node),
+            height: cardHeight(node),
           }
         }),
       )
       setDirty(true)
     },
     [pushHistory, setNodes],
+  )
+
+  // 拖边角改尺寸：React Flow 把新宽高放在 dimensions 里，回写到卡片数据上
+  const onNodesChange2 = useCallback(
+    (changes: any[]) => {
+      onNodesChange(changes)
+      const dims = changes.filter((c) => c.type === 'dimensions' && c.resizing && c.dimensions)
+      if (!dims.length) return
+      setNodes((ns) =>
+        ns.map((n) => {
+          const c = dims.find((d) => d.id === n.id)
+          if (!c) return n
+          const node = {
+            ...(n.data as any).node,
+            w: Math.round(c.dimensions.width),
+            h: Math.round(c.dimensions.height),
+          }
+          if (
+            node.w === (n.data as any).node.w &&
+            node.h === (n.data as any).node.h
+          )
+            return n
+          return { ...n, data: { ...n.data, node } }
+        }),
+      )
+      setDirty(true)
+    },
+    [onNodesChange, setNodes],
   )
 
   const cycleState = useCallback(
@@ -208,7 +250,15 @@ function Editor() {
   )
 
   const ctx = useMemo(
-    () => ({ statuses, mode, patch, cycleState }),
+    () => ({
+      statuses,
+      mode,
+      patch,
+      cycleState,
+      // 拖边角松手时把最终尺寸写进卡片数据（这样才会被存下来）
+      resize: (id: string, w: number, h: number) =>
+        patch(id, { w: Math.round(w), h: Math.round(h) }),
+    }),
     [statuses, mode, patch, cycleState],
   )
 
@@ -233,7 +283,8 @@ function Editor() {
               zIndex: 2,
               position: { x: n.x, y: n.y },
               data: { node: n },
-              style: { width: cardWidth(n), height: cardHeight(n) },
+              width: cardWidth(n),
+              height: cardHeight(n),
             }
           }),
         )
@@ -335,7 +386,8 @@ function Editor() {
           type: 'card',
           position: { x, y },
           data: { node, autoEdit: true },
-          style: { width: cardWidth(node), height: cardHeight(node) },
+          width: cardWidth(node),
+          height: cardHeight(node),
           zIndex: 2,
         },
       ])
@@ -370,7 +422,6 @@ function Editor() {
 
   const onConnect = useCallback(
     (c: Connection) => {
-      if (mode !== 'edit') return
       if (!c.source || !c.target || c.source === c.target) return
       pushHistory()
       setEdges((es) =>
@@ -394,10 +445,6 @@ function Editor() {
   const onPaneClick = (e: React.MouseEvent) => {
     // 自己数双击：React Flow 的 pane 会吃掉原生 dblclick，detail 也不一定可靠
     ;(window as any).__pc = ((window as any).__pc || 0) + 1
-    if (mode !== 'edit') {
-      setSelId(null)
-      return
-    }
     const now = Date.now()
     const dist = Math.hypot(e.clientX - lastPane.current.x, e.clientY - lastPane.current.y)
     const dbl = now - lastPane.current.t < 400 && dist < 12
@@ -439,11 +486,13 @@ function Editor() {
         setMode((m) => (m === 'edit' ? 'view' : 'edit'))
         return
       }
-      if (typing) return
-      if (mode !== 'edit') {
-        if (e.key === 'Escape') setSelId(null)
+      // Ctrl+/ 在编辑和预览之间来回切（焦点在正文里时由 Drawer 自己处理）
+      if (meta && k === '/') {
+        e.preventDefault()
+        setMode((m) => (m === 'edit' ? 'view' : 'edit'))
         return
       }
+      if (typing) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         delSelected()
@@ -490,10 +539,7 @@ function Editor() {
     const files = Array.from(e.dataTransfer?.files || [])
     if (!files.length) return
     e.preventDefault()
-    if (mode !== 'edit') {
-      setMsg('预览模式下不能改内容，切回编辑再拖')
-      return
-    }
+    if (!files.length) return
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
     const hit = nodesRef.current.find((n) => {
       const x = n.position.x
@@ -585,7 +631,6 @@ function Editor() {
   }
 
   const startGroupDrag = (gid: string, e: React.PointerEvent) => {
-    if (modeRef.current !== 'edit') return
     const g = groupsRef.current.find((x) => x.id === gid)
     if (!g) return
     e.preventDefault()
@@ -631,7 +676,6 @@ function Editor() {
 
   const openGroupEdit = (gid: string, e: React.PointerEvent) => {
     ;(window as any).__ge = ((window as any).__ge || 0) + 1
-    if (modeRef.current !== 'edit') return
     gEditAt.current = Date.now()
     setGEdit({ id: gid, x: e.clientX, y: e.clientY })
   }
@@ -786,7 +830,8 @@ function Editor() {
     setDirty(true)
   }
 
-  const sel = nodes.find((n) => n.id === selId)
+  const drawerNode = nodes.find((n) => n.id === (selId ?? (pin ? lastId : null)))
+  const showDrawer = pin || Boolean(drawerNode)
 
   return (
     <EditorCtx.Provider value={ctx}>
@@ -804,7 +849,7 @@ function Editor() {
           <button onClick={() => setNewOpen(true)} title="新建一个流程">
             ＋ 新建
           </button>
-          <button onClick={() => addNode()} title="Ctrl+N" disabled={mode !== 'edit'}>
+          <button onClick={() => addNode()} title="Ctrl+N">
             ＋ 卡片
           </button>
           <div className="group">
@@ -820,20 +865,6 @@ function Editor() {
             <button onClick={() => rf.zoomTo(1)}>100%</button>
           </div>
           <span className="meta">{zoom}%</span>
-          <span className="legend">
-            {statuses.map((s) => {
-              const cnt = nodes.filter(
-                (x) => ((x.data as any).node.state || statuses[0]?.key) === s.key,
-              ).length
-              return (
-                <span className="lg" key={s.key}>
-                  <i style={{ background: s.color }} />
-                  {s.label}
-                  <b>{cnt}</b>
-                </span>
-              )
-            })}
-          </span>
           <span className="sp" />
           <button id="m-export" onClick={doExport} title="导出一份只读网页">
             导出网页
@@ -846,13 +877,13 @@ function Editor() {
             <ReactFlow
               nodes={nodes}
               edges={edges}
-              onNodesChange={onNodesChange}
+              onNodesChange={onNodesChange2}
               onEdgesChange={onEdgesChange}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onConnect={onConnect}
-              nodesDraggable={mode === 'edit'}
-              nodesConnectable={mode === 'edit'}
+              nodesDraggable
+              nodesConnectable
               elementsSelectable
               onNodeClick={(_, n) => setSelId(n.id)}
               onPaneClick={onPaneClick}
@@ -968,13 +999,15 @@ function Editor() {
             ) : null}
           </div>
 
-          {sel ? (
+          {showDrawer ? (
             <Drawer
-              node={(sel.data as any).node}
+              node={drawerNode ? ((drawerNode.data as any).node as FlowNode) : null}
               statuses={statuses}
               project={project}
               mode={mode}
               onMode={setMode}
+              pin={pin}
+              onTogglePin={() => setPin(!pin)}
               width={drawerW}
               onWidth={(w) => {
                 setDrawerW(w)
@@ -984,8 +1017,12 @@ function Editor() {
               onToggleFloat={() => setDrawerFloat((f) => !f)}
               pos={drawerPos}
               onPos={setDrawerPos}
-              onPatch={(p) => patch(sel.id, p)}
-              onClose={() => setSelId(null)}
+              onPatch={(p) => drawerNode && patch(drawerNode.id, p)}
+              onClose={() => {
+                setSelId(null)
+                setLastId(null)
+                setPin(false)
+              }}
               onToast={(m) => setMsg(m)}
             />
           ) : null}

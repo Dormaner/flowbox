@@ -33,6 +33,23 @@ page.on('console', (m) => {
 page.on('dialog', (d) => (d.type() === 'prompt' ? d.accept('测试分组') : d.accept()))
 
 await page.goto(URL, { waitUntil: 'networkidle2' })
+
+await page.goto(URL, { waitUntil: 'networkidle2' })
+
+// 先把数据目录认定清楚：bridge 必须只暴露「测试项目」，否则绝不动手
+const BRIDGE = process.env.FB_BRIDGE || 'http://127.0.0.1:8765'
+const names = await page
+  .evaluate(async (u) => {
+    const r = await fetch(u + '/projects')
+    return r.ok ? await r.json() : null
+  }, BRIDGE)
+  .catch(() => null)
+if (!names || names.length !== 1 || names[0] !== '测试项目') {
+  console.error('bridge 暴露的项目是 ' + JSON.stringify(names) + '，必须是只有「测试项目」的临时目录')
+  await browser.close()
+  process.exit(2)
+}
+
 await page.waitForSelector('.card', { timeout: 20000 })
 await page.select('.tb select', '测试项目').catch(() => {})
 await sleep(900)
@@ -144,7 +161,88 @@ await step('上传文件写入正文', async () => {
 })
 
 
-// 多选 → 排版条 → 成组
+// 自由缩放 + 自适应
+const selectedCardWidth = () =>
+  page.evaluate(() => {
+    const c = document.querySelector('.react-flow__node.selected .card') || document.querySelector('.card')
+    return Math.round(c.getBoundingClientRect().width)
+  })
+
+await step('拖边角改大小', async () => {
+  const before = await selectedCardWidth()
+  const h = await page.evaluate(() => {
+    const el = [...document.querySelectorAll('.react-flow__resize-control.handle')].find(
+      (x) => x.className.includes('bottom') && x.className.includes('right'),
+    )
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }
+  })
+  if (!h) return check('拖边角改大小', false, '看不到缩放把手')
+  await page.mouse.move(h.x, h.y)
+  await page.mouse.down()
+  await page.mouse.move(h.x + 30, h.y + 20, { steps: 6 })
+  await page.mouse.move(h.x + 60, h.y + 40, { steps: 6 })
+  await page.mouse.up()
+  await sleep(500)
+  const after = await selectedCardWidth()
+  const label = await page.$eval('.drawer .msize', (e) => e.textContent || '').catch(() => '')
+  check('拖边角改大小', after > before + 15, `${before} -> ${after}，详情栏显示 ${label.trim()}`)
+})
+
+await step('自适应按钮回到自动尺寸', async () => {
+  await page.click('.drawer .mini-btn')
+  await sleep(500)
+  const label = await page.$eval('.drawer .msize', (e) => e.textContent || '')
+  check('自适应按钮回到自动尺寸', label.includes('自动'), label.trim())
+})
+
+// 模式只管详情：预览下画布照样能改
+await step('预览模式下画布仍可编辑', async () => {
+  await page.click('#m-view')
+  await sleep(300)
+  const n0 = await page.$$eval('.card', (els) => els.length)
+  const pane = await page.evaluate(() => {
+    const p = document.querySelector('.react-flow__pane')
+    const r = p.getBoundingClientRect()
+    return { x: Math.round(r.x + 200), y: Math.round(r.y + r.height - 170) }
+  })
+  await page.mouse.click(pane.x, pane.y, { delay: 10 })
+  await page.mouse.click(pane.x, pane.y, { delay: 10 })
+  await sleep(500)
+  const n1 = await page.$$eval('.card', (els) => els.length)
+  await page.keyboard.press('Escape')
+  check('预览模式下画布仍可编辑', n1 === n0 + 1, `${n0} -> ${n1}`)
+  await page.click('#m-edit')
+  await sleep(300)
+})
+
+await step('Ctrl+/ 来回切换', async () => {
+  await page.keyboard.down('Control')
+  await page.keyboard.press('/')
+  await page.keyboard.up('Control')
+  await sleep(350)
+  const toView = await page.$eval('#m-view', (e) => e.className.includes('on'))
+  await page.keyboard.down('Control')
+  await page.keyboard.press('/')
+  await page.keyboard.up('Control')
+  await sleep(350)
+  const toEdit = await page.$eval('#m-edit', (e) => e.className.includes('on'))
+  check('Ctrl+/ 来回切换', toView && toEdit, `编辑->预览 ${toView}，预览->编辑 ${toEdit}`)
+})
+
+await step('详情栏固定后不选卡片也不消失', async () => {
+  const pinned = await page.$eval('#d-pin', (e) => e.className.includes('on'))
+  await page.mouse.click(60, 200)
+  await sleep(400)
+  const stillThere = Boolean(await page.$('.drawer'))
+  check('详情栏固定后不选卡片也不消失', pinned === true && stillThere, `固定=${pinned}，还在=${stillThere}`)
+})
+
+await step('顶部不再有状态计数', async () => {
+  check('顶部不再有状态计数', (await page.$$('.tb .legend')).length === 0)
+})
+
 await step('多选出现排版工具条', async () => {
   await page.click('#d-close')
   await page.waitForFunction(() => !document.querySelector('.drawer'), { timeout: 5000 })
@@ -220,6 +318,8 @@ await step('拖圆点连成线', async () => {
         if (a === b) continue
         const to = pick(b, 'left')
         if (!isHandle(to)) continue
+        // 两点太近时拖拽会被当成点击
+        if (Math.hypot(to.x - from.x, to.y - from.y) < 150) continue
         return { from, to }
       }
     }
