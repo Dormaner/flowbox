@@ -123,23 +123,32 @@ def round_path(pts: list, r: float = 13.0, steps: int = 8) -> list:
     return out
 
 
+def bezier_link(sx, sy, tx, ty, steps=28):
+    """贝塞尔连线：跟 canvas_demo.py / web/src/geometry.ts 同一套规则。"""
+    dx = tx - sx
+    if tx >= sx + 24:
+        k = max(40.0, min(dx * 0.5, 180.0))
+        c1x, c1y, c2x, c2y = sx + k, sy, tx - k, ty
+    else:
+        out = max(60.0, min(abs(dx) * 0.4, 140.0))
+        lift = 26.0 if ty >= sy else -26.0
+        c1x, c1y, c2x, c2y = sx + out, sy + lift, tx - out, ty + lift
+    pts = []
+    for i in range(steps + 1):
+        t = i / steps
+        mt = 1.0 - t
+        pts.append(mt ** 3 * sx + 3 * mt * mt * t * c1x
+                   + 3 * mt * t * t * c2x + t ** 3 * tx)
+        pts.append(mt ** 3 * sy + 3 * mt * mt * t * c1y
+                   + 3 * mt * t * t * c2y + t ** 3 * ty)
+    return pts
+
+
 def edge_points(a: dict, b: dict) -> list:
-    """走线：直角 + 圆角。返回扁平坐标表，画布和导出都用它。"""
+    """走线：贝塞尔，水平切线。返回扁平坐标表，画布和导出都用它。"""
     x1, y1 = a["x"] + CARD_W, a["y"] + CARD_H / 2
     x2, y2 = b["x"], b["y"] + CARD_H / 2
-    dx, dy = x2 - x1, y2 - y1
-    if abs(dy) < 3 or (abs(dy) <= 26 and dx >= 36):
-        return [x1, y1, x2, y2]
-    if dx >= 36:
-        mx = x1 + max(30.0, min(dx * 0.5, 150.0))
-        return round_path([(x1, y1), (mx, y1), (mx, y2), (x2, y2)], 13)
-    out = 34.0
-    if y2 >= y1 - 4:
-        ydet = max(y1, y2) + CARD_H * 0.5 + 22
-    else:
-        ydet = min(y1, y2) - CARD_H * 0.5 - 22
-    return round_path([(x1, y1), (x1 + out, y1), (x1 + out, ydet),
-                       (x2 - out, ydet), (x2 - out, y2), (x2, y2)], 13)
+    return bezier_link(x1, y1, x2, y2)
 
 
 # ---------------------------------------------------------------- 卡片

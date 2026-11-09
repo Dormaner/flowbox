@@ -155,26 +155,38 @@ button:hover:disabled { background: transparent; }
   color: var(--sub);
 }
 
-/* 连接点 */
+/* 连接点：平常是淡淡的小圆，悬停才亮 */
 .react-flow__handle.port {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border: 2px solid #fff;
-  background: var(--accent);
-  opacity: 0;
-  transition: opacity 0.12s;
+  background: #b9c0cb;
+  opacity: 0.7;
+  transition: opacity 0.12s, background 0.12s, transform 0.12s;
 }
-.react-flow__node:hover .react-flow__handle.port,
-.react-flow__handle.port.connecting { opacity: 1; }
+.react-flow__node:hover .react-flow__handle.port {
+  opacity: 1;
+  background: var(--accent);
+  transform: scale(1.25);
+}
+.react-flow__handle.port.connecting { opacity: 1; background: var(--accent); }
 .react-flow__handle.port.left { left: -6px; }
 .react-flow__handle.port.right { right: -6px; }
 
 /* ---------------- 连线 ---------------- */
 
-.react-flow__edge-path { stroke: #3c4149; stroke-width: 2.2; }
+.react-flow__edge-path { stroke: #8a94a6; stroke-width: 1.8; transition: stroke 0.15s, stroke-width 0.15s; }
 .react-flow__edge:hover .react-flow__edge-path,
-.react-flow__edge.selected .react-flow__edge-path { stroke: var(--accent); stroke-width: 2.8; }
-.react-flow__edge.dim { opacity: 0.12; }
+.react-flow__edge.selected .react-flow__edge-path { stroke: var(--accent); stroke-width: 2.4; }
+.react-flow__edge-interaction { cursor: pointer; }
+.fb-dim { opacity: 0.1; transition: opacity 0.15s; }
+.fb-arrow {
+  fill: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.react-flow__edge:hover .fb-arrow,
+.react-flow__edge.selected .fb-arrow { opacity: 1; }
 
 .elabel {
   position: absolute;
@@ -298,6 +310,69 @@ button:hover:disabled { background: transparent; }
   cursor: pointer;
 }
 .addfield:hover { border-color: #93b4f7; color: var(--accent); background: #fff; }
+
+/* 字段头：名字 + 类型 + 上移/下移/删除 */
+.dfield .fl .fname {
+  flex: 1;
+  min-width: 60px;
+  margin: 0;
+  padding: 2px 4px;
+  font-size: 11.5px;
+  color: #8a94a6;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  outline: none;
+}
+.dfield .fl .fname:hover { border-color: #e6e8eb; }
+.dfield .fl .fname:focus { border-color: #c7d2fe; background: #fff; color: var(--text); }
+.dfield .fl .ftype {
+  font: inherit;
+  font-size: 11px;
+  color: #6b7280;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  padding: 2px;
+  outline: none;
+  cursor: pointer;
+}
+.dfield .fl .ftype:hover { border-color: #e6e8eb; background: #f9fafb; }
+.dfield .fl .mini {
+  padding: 0 5px;
+  line-height: 18px;
+  font-size: 11px;
+  color: #9aa1aa;
+  border-radius: 5px;
+}
+.dfield .fl .mini:hover { color: var(--text); }
+.dfield .fl .mini.danger:hover { color: #b91c1c; background: #fef2f2; }
+
+/* 添加字段：类型选择 */
+.typemenu {
+  margin-top: 6px;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+  padding: 4px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.1);
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+}
+.typemenu button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 6px 8px;
+  text-align: left;
+  border-radius: 7px;
+}
+.typemenu button b { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.typemenu button span { font-size: 10.5px; color: #9aa1aa; line-height: 1.3; }
+.typemenu button:hover { background: #eef2ff; }
+.typemenu button:hover b { color: var(--accent); }
 
 .legend { display: flex; gap: 14px; font-size: 12px; color: #5b6373; }
 .legend .lg { display: inline-flex; align-items: center; gap: 5px; }

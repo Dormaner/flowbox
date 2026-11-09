@@ -322,6 +322,30 @@ def path_mid(pts):
     return pts[0], pts[1]
 
 
+def bezier_link(sx, sy, tx, ty, steps=28):
+    """贝塞尔连线：正向平着出、平着进；回退绕出去再兜回来。
+
+    跟 web/src/geometry.ts 的 linkControls 是同一套规则，改一处必须改另一处。
+    """
+    dx = tx - sx
+    if tx >= sx + 24:
+        k = max(40.0, min(dx * 0.5, 180.0))
+        c1x, c1y, c2x, c2y = sx + k, sy, tx - k, ty
+    else:
+        out = max(60.0, min(abs(dx) * 0.4, 140.0))
+        lift = 26.0 if ty >= sy else -26.0
+        c1x, c1y, c2x, c2y = sx + out, sy + lift, tx - out, ty + lift
+    pts = []
+    for i in range(steps + 1):
+        t = i / steps
+        mt = 1.0 - t
+        pts.append(mt ** 3 * sx + 3 * mt * mt * t * c1x
+                   + 3 * mt * t * t * c2x + t ** 3 * tx)
+        pts.append(mt ** 3 * sy + 3 * mt * mt * t * c1y
+                   + 3 * mt * t * t * c2y + t ** 3 * ty)
+    return pts
+
+
 def round_rect(cv, x1, y1, x2, y2, r=10, **kw):
     pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r,
            x2, y2 - r, x2, y2, x2 - r, y2, x1 + r, y2,
@@ -1133,22 +1157,9 @@ class App:
         return (a["x"] + CARD_W, a["y"] + CARD_H / 2, b["x"], b["y"] + CARD_H / 2)
 
     def edge_points(self, a, b):
-        """走线：直角 + 圆角，跟流程图一个路数，比曲线稳。"""
+        """走线：贝塞尔，水平切线（跟 web/src/geometry.ts 同一套规则）。"""
         x1, y1, x2, y2 = self.anchors(a, b)
-        dx, dy = x2 - x1, y2 - y1
-        if abs(dy) < 3 or (abs(dy) <= 26 and dx >= 36):
-            return [x1, y1, x2, y2]          # 几乎对齐：一条斜线，别做小台阶
-        if dx >= 36:                       # 正向：右 → 竖 → 右
-            mx = x1 + max(30.0, min(dx * 0.5, 150.0))
-            return round_path([(x1, y1), (mx, y1), (mx, y2), (x2, y2)], 13)
-        # 往回连：右 → 绕到上/下方 → 左 → 竖 → 右
-        out = 34.0
-        if y2 >= y1 - 4:
-            ydet = max(y1, y2) + CARD_H * 0.5 + 22
-        else:
-            ydet = min(y1, y2) - CARD_H * 0.5 - 22
-        return round_path([(x1, y1), (x1 + out, y1), (x1 + out, ydet),
-                           (x2 - out, ydet), (x2 - out, y2), (x2, y2)], 13)
+        return bezier_link(x1, y1, x2, y2)
 
     def redraw(self):
         cv = self.cv

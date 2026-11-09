@@ -398,10 +398,10 @@ main{position:relative;flex:1;min-height:0}
 .grp.dim{opacity:.15}
 .grp span{position:absolute;left:10px;top:4px;font-size:11px;font-weight:600;color:#5b6b82}
 #edges{position:absolute;left:0;top:0;overflow:visible}
-.edge{fill:none;stroke:#3c4149;stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round;
- marker-end:url(#arw);transition:opacity .15s,stroke .15s}
+.edge{fill:none;stroke:#8a94a6;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round;
+ transition:opacity .15s,stroke .15s,stroke-width .15s}
 .edge.dim{opacity:.1}
-.edge.hl{stroke:#2563eb;stroke-width:2.8}
+.edge.hl,.edge:hover{stroke:#2563eb;stroke-width:2.4;marker-end:url(#arw)}
 .elab{font-size:11px;fill:#6b7280;text-anchor:middle;paint-order:stroke;stroke:#fbfbfc;
  stroke-width:4px;transition:opacity .15s}
 .elab.dim{opacity:.08}

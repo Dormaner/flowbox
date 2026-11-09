@@ -1,5 +1,6 @@
 import { createContext, memo, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Handle, Position, type NodeProps } from '@xyflow/react'
+import { HoverCtx } from './hover'
 import type { FlowNode, Status } from './types'
 
 type Ctx = {
@@ -20,6 +21,7 @@ const autoEdited = new Set<string>()
 function CardNodeInner({ id, data, selected }: NodeProps) {
   const n = (data as any).node as FlowNode
   const ctx = useContext(EditorCtx)
+  const { setHover } = useContext(HoverCtx)
   const [editing, setEditing] = useState<null | 'title' | 'sum'>(null)
   const [draft, setDraft] = useState('')
   const taRef = useRef<HTMLTextAreaElement>(null)
@@ -70,7 +72,11 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
   }
 
   return (
-    <div className={`card${selected ? ' sel' : ''}`}>
+    <div
+      className={`card${selected ? ' sel' : ''}`}
+      onMouseEnter={() => setHover(id)}
+      onMouseLeave={() => setHover(null)}
+    >
       <i
         className="dot"
         style={{ background: color }}

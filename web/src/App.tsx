@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -18,54 +18,71 @@ import {
 } from '@xyflow/react'
 import CardNode, { EditorCtx } from './CardNode'
 import Drawer from './Drawer'
-import { CARD_W, CARD_H, edgePath, edgePoints, pathMid } from './geometry'
+import { HoverCtx } from './hover'
+import { CARD_W, CARD_H, bezierAt, edgePath, pathMid } from './geometry'
 import { DEFAULT_STATUSES, type Doc, type FlowNode, type Status } from './types'
 import { listProjects, loadProject, saveProject } from './storage'
 
 const nodeTypes = { card: CardNode }
 
-function FlowEdge({ id, sourceX, sourceY, targetX, targetY, data }: EdgeProps) {
-  const pts = edgePoints(sourceX, sourceY, targetX, targetY)
+function FlowEdge({
+  id,
+  source,
+  target,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  data,
+  selected,
+}: EdgeProps) {
+  const { hover } = useContext(HoverCtx)
   const d = edgePath(sourceX, sourceY, targetX, targetY)
-  const [mx, my] = pathMid(pts)
+  const [mx, my] = pathMid(sourceX, sourceY, targetX, targetY)
   const label = (data as any)?.label as string | undefined
+  const dim = !!hover && hover !== source && hover !== target
+
+  // 箭头只在悬停/选中时出现：按终点切线算一个三角
+  const tip = bezierAt(sourceX, sourceY, targetX, targetY, 1)
+  const prev = bezierAt(sourceX, sourceY, targetX, targetY, 0.96)
+  const vx = tip[0] - prev[0]
+  const vy = tip[1] - prev[1]
+  const len = Math.hypot(vx, vy) || 1
+  const ux = vx / len
+  const uy = vy / len
+  const head = 9
+  const half = 4
+  const p2 = [tip[0] - ux * head - uy * half, tip[1] - uy * head + ux * half]
+  const p3 = [tip[0] - ux * head + uy * half, tip[1] - uy * head - ux * half]
+
   return (
-    <>
-      <path id={id} className="react-flow__edge-path" d={d} fill="none" markerEnd="url(#fb-arrow)" />
+    <g className={dim ? 'fb-dim' : selected ? 'fb-sel' : ''}>
+      <path id={id} className="react-flow__edge-path" d={d} fill="none" />
+      <path
+        className="react-flow__edge-interaction"
+        d={d}
+        fill="none"
+        strokeWidth={18}
+        stroke="transparent"
+      />
+      <polygon
+        className="fb-arrow"
+        points={`${tip[0]},${tip[1]} ${p2[0]},${p2[1]} ${p3[0]},${p3[1]}`}
+      />
       {label ? (
         <EdgeLabelRenderer>
           <div
             className="elabel nodrag nopan"
-            style={{ transform: `translate(-50%,-50%) translate(${mx}px,${my - 10}px)` }}
+            style={{ transform: `translate(-50%,-50%) translate(${mx}px,${my - 9}px)` }}
           >
             {label}
           </div>
         </EdgeLabelRenderer>
       ) : null}
-    </>
+    </g>
   )
 }
 const edgeTypes = { fb: FlowEdge }
-
-function ArrowDefs() {
-  return (
-    <svg style={{ position: 'absolute', width: 0, height: 0 }} aria-hidden>
-      <defs>
-        <marker
-          id="fb-arrow"
-          viewBox="0 0 10 10"
-          refX="9"
-          refY="5"
-          markerWidth="6"
-          markerHeight="6"
-          orient="auto-start-reverse"
-        >
-          <path d="M0,0 L10,5 L0,10 z" fill="#3C4149" />
-        </marker>
-      </defs>
-    </svg>
-  )
-}
 
 type Snap = { nodes: Node[]; edges: Edge[] }
 
@@ -79,6 +96,8 @@ function Editor() {
   const [msg, setMsg] = useState('连上 bridge.py 才能读写项目')
   const [dirty, setDirty] = useState(false)
   const [zoom, setZoom] = useState(100)
+  const [hover, setHover] = useState<string | null>(null)
+  const hoverCtx = useMemo(() => ({ hover, setHover }), [hover])
   const [, setHistVer] = useState(0)
   const rf = useReactFlow()
 
@@ -379,7 +398,7 @@ function Editor() {
 
   return (
     <EditorCtx.Provider value={ctx}>
-      <ArrowDefs />
+      <HoverCtx.Provider value={hoverCtx}>
       <div className="app">
         <div className="tb">
           <div className="title">流程盒子</div>
@@ -480,6 +499,7 @@ function Editor() {
           ) : null}
         </div>
       </div>
+      </HoverCtx.Provider>
     </EditorCtx.Provider>
   )
 

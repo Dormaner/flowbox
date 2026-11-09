@@ -1,75 +1,61 @@
-// 连线几何：跟 canvas_demo.py / editor_qt.py / html_export.py 是同一套规则
-// （右边出、左边进，直角 + 13 圆角，往回连的线绕一圈）。
+// 连线几何：贝塞尔 + 水平切线（Blender / Grasshopper 那种形态）
+// canvas_demo.py 的 bezier_link 和 editor_qt.py 用同一套规则，三处必须同时改。
 
 export const CARD_W = 190
 export const CARD_H = 88
 
 export type Pt = [number, number]
 
-export function edgePoints(sx: number, sy: number, tx: number, ty: number): Pt[] {
+/** 控制点：正向平着出、平着进；回退时绕出去再兜回来 */
+export function linkControls(
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+): { c1: Pt; c2: Pt; back: boolean } {
   const dx = tx - sx
-  const dy = ty - sy
-  if (Math.abs(dy) < 3 || (Math.abs(dy) <= 26 && dx >= 36)) {
-    return [[sx, sy], [tx, ty]]
+  if (tx >= sx + 24) {
+    const k = Math.max(40, Math.min(dx * 0.5, 180))
+    return { c1: [sx + k, sy], c2: [tx - k, ty], back: false }
   }
-  if (dx >= 36) {
-    const mx = sx + Math.max(30, Math.min(dx * 0.5, 150))
-    return [[sx, sy], [mx, sy], [mx, ty], [tx, ty]]
-  }
-  const out = 34
-  const ydet = ty >= sy - 4
-    ? Math.max(sy, ty) + CARD_H / 2 + 22
-    : Math.min(sy, ty) - CARD_H / 2 - 22
-  return [
-    [sx, sy], [sx + out, sy], [sx + out, ydet],
-    [tx - out, ydet], [tx - out, ty], [tx, ty],
-  ]
-}
-
-export function roundPath(pts: Pt[], r = 13): string {
-  if (pts.length < 2) return ''
-  let d = `M ${pts[0][0]} ${pts[0][1]}`
-  for (let i = 1; i < pts.length - 1; i++) {
-    const [p0, p1, p2] = [pts[i - 1], pts[i], pts[i + 1]]
-    const v1 = [p1[0] - p0[0], p1[1] - p0[1]]
-    const v2 = [p2[0] - p1[0], p2[1] - p1[1]]
-    const l1 = Math.hypot(v1[0], v1[1]) || 1
-    const l2 = Math.hypot(v2[0], v2[1]) || 1
-    const r1 = Math.min(r, l1 / 2)
-    const r2 = Math.min(r, l2 / 2)
-    const a: Pt = [p1[0] - (v1[0] / l1) * r1, p1[1] - (v1[1] / l1) * r1]
-    const b: Pt = [p1[0] + (v2[0] / l2) * r2, p1[1] + (v2[1] / l2) * r2]
-    d += ` L ${a[0]} ${a[1]} Q ${p1[0]} ${p1[1]} ${b[0]} ${b[1]}`
-  }
-  const last = pts[pts.length - 1]
-  d += ` L ${last[0]} ${last[1]}`
-  return d
+  const out = Math.max(60, Math.min(Math.abs(dx) * 0.4, 140))
+  const lift = ty >= sy ? 26 : -26
+  return { c1: [sx + out, sy + lift], c2: [tx - out, ty + lift], back: true }
 }
 
 export function edgePath(sx: number, sy: number, tx: number, ty: number): string {
-  return roundPath(edgePoints(sx, sy, tx, ty))
+  const { c1, c2 } = linkControls(sx, sy, tx, ty)
+  return `M ${sx} ${sy} C ${c1[0]} ${c1[1]}, ${c2[0]} ${c2[1]}, ${tx} ${ty}`
 }
 
-/** 路径中点，用来放连线标签 */
-export function pathMid(pts: Pt[]): Pt {
-  if (pts.length < 2) return [0, 0]
-  let total = 0
-  const segs: { d: number; i: number }[] = []
-  for (let i = 0; i < pts.length - 1; i++) {
-    const d = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1])
-    segs.push({ d, i })
-    total += d
-  }
-  let acc = 0
-  for (const s of segs) {
-    if (acc + s.d >= total / 2) {
-      const t = s.d <= 1e-9 ? 0 : (total / 2 - acc) / s.d
-      return [
-        pts[s.i][0] + (pts[s.i + 1][0] - pts[s.i][0]) * t,
-        pts[s.i][1] + (pts[s.i + 1][1] - pts[s.i][1]) * t,
-      ]
-    }
-    acc += s.d
-  }
-  return pts[0]
+export function bezierAt(
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+  t: number,
+): Pt {
+  const { c1, c2 } = linkControls(sx, sy, tx, ty)
+  const mt = 1 - t
+  return [
+    mt * mt * mt * sx + 3 * mt * mt * t * c1[0] + 3 * mt * t * t * c2[0] + t * t * t * tx,
+    mt * mt * mt * sy + 3 * mt * mt * t * c1[1] + 3 * mt * t * t * c2[1] + t * t * t * ty,
+  ]
+}
+
+/** 采样成折线（给需要点序列的地方用，比如箭头方向和 Python 侧对齐） */
+export function edgeSamples(
+  sx: number,
+  sy: number,
+  tx: number,
+  ty: number,
+  steps = 24,
+): Pt[] {
+  const out: Pt[] = []
+  for (let i = 0; i <= steps; i++) out.push(bezierAt(sx, sy, tx, ty, i / steps))
+  return out
+}
+
+export function pathMid(sx: number, sy: number, tx: number, ty: number): Pt {
+  return bezierAt(sx, sy, tx, ty, 0.5)
 }
