@@ -21,6 +21,8 @@ import zipfile
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+import html_export          # 只读网页导出，跟本文件放一起
+
 try:
     from tkinterdnd2 import DND_FILES, TkinterDnD
 except Exception:
@@ -2406,85 +2408,16 @@ class App:
             messagebox.showerror("导出失败", str(e))
 
     def build_html(self):
-        import base64
-        import html as H
-
-        nodes = sorted(self.data.get("nodes", []), key=lambda n: (n["x"], n["y"]))
-        kinds = {"todo": "未开始", "doing": "进行中", "done": "已完成"}
-        ST = {"todo": "#8a94a6", "doing": "#2563eb", "done": "#15803d"}
-        out = [
-            "<!doctype html><html lang='zh'><meta charset='utf-8'>",
-            f"<title>{H.escape(self.proj_name)} · 流程</title>",
-            "<style>",
-            "body{font-family:'Microsoft YaHei UI',system-ui,sans-serif;max-width:860px;",
-            "margin:40px auto;padding:0 20px;color:#1f2329;line-height:1.7;background:#fff}",
-            "h1{font-size:26px;margin:0 0 6px}.sub{color:#6b7280;margin-bottom:28px}",
-            ".step{border:1px solid #e3e5e8;border-radius:10px;padding:16px 18px;margin:14px 0}",
-            ".no{color:#9aa1aa;font-size:12px}",
-            ".name{font-size:17px;font-weight:600;margin:2px 0 4px}",
-            ".sum{color:#6b7280;font-size:14px}",
-            ".st{float:right;font-size:12px;padding:2px 8px;border-radius:10px;background:#f0f1f3}",
-            "h4{margin:14px 0 4px;font-size:13px;color:#6b7280;font-weight:normal}",
-            "ul{margin:4px 0;padding-left:20px}li{margin:2px 0}",
-            "img{max-width:100%;border:1px solid #e3e5e8;border-radius:6px;margin:6px 0}",
-            ".arrow{text-align:center;color:#b9c0cb;font-size:18px;margin:-6px 0}",
-            ".foot{margin-top:36px;color:#9aa1aa;font-size:12px}",
-            "</style><body>",
-            f"<h1>{H.escape(self.proj_name)}</h1>",
-            f"<div class='sub'>共 {len(nodes)} 步 · 导出时间 "
-            f"{time.strftime('%Y-%m-%d %H:%M')} · 只读快照</div>",
-        ]
-        for i, n in enumerate(nodes, 1):
-            st = n.get("state", "todo")
-            out.append("<div class='step'>")
-            out.append(f"<span class='st' style='color:{ST.get(st, '#8a94a6')}'>"
-                       f"{kinds.get(st, '')}</span>")
-            out.append(f"<div class='no'>第 {i} 步</div>")
-            out.append(f"<div class='name'>{H.escape(n.get('name', ''))}</div>")
-            if n.get("summary"):
-                out.append(f"<div class='sum'>{H.escape(n['summary'])}</div>")
-            for f in n.get("fields") or []:
-                t = f.get("type")
-                label = H.escape(f.get("label", ""))
-                val = f.get("value")
-                if t in ("text", "number", "date", "user", "select"):
-                    if str(val or "").strip():
-                        out.append(f"<h4>{label}</h4><div>{H.escape(str(val))}</div>")
-                elif t in ("multiselect", "list"):
-                    items = val if isinstance(val, list) else []
-                    if items:
-                        out.append(f"<h4>{label}</h4><ul>" + "".join(
-                            f"<li>{H.escape(str(x))}</li>" for x in items) + "</ul>")
-                elif t == "attachment":
-                    items = val if isinstance(val, list) else []
-                    if items:
-                        out.append(f"<h4>{label}</h4><ul>" + "".join(
-                            f"<li>{H.escape(str(m.get('name', '')))}"
-                            f"{'（已附）' if m.get('file') else ''}</li>"
-                            for m in items if isinstance(m, dict)) + "</ul>")
-                elif t == "link":
-                    url, text = self.link_parts(f)
-                    if url:
-                        out.append(f"<h4>{H.escape(label)}</h4>"
-                                   f"<a href='{H.escape(url)}'>{H.escape(text)}</a>")
-                elif t == "image":
-                    for rel in (val or [])[:6]:
-                        fp = self.proj / str(rel)
-                        if not fp.exists():
-                            continue
-                        try:
-                            b64 = base64.b64encode(fp.read_bytes()).decode()
-                            out.append(f"<img src='data:image/png;base64,{b64}'>")
-                        except Exception:
-                            pass
-                elif t == "checkbox":
-                    out.append(f"<h4>{label}</h4><div>{'是' if val else '否'}</div>")
-            out.append("</div>")
-            if i < len(nodes):
-                out.append("<div class='arrow'>↓</div>")
-        out.append("<div class='foot'>由「流程盒子」导出 · 只读，不能编辑</div>")
-        out.append("</body></html>")
-        return "\n".join(out)
+        """只读网页：能缩放、能平移、能搜索，点卡片看这一步的材料。"""
+        geo = []
+        for e in self.data.get("edges", []):
+            a, b = self.node(e.get("a")), self.node(e.get("b"))
+            if a and b:
+                geo.append({"a": e.get("a"), "b": e.get("b"),
+                            "pts": self.edge_points(a, b),
+                            "label": e.get("label") or ""})
+        return html_export.render(self.proj_name, self.data,
+                                  self.status_list(), self.proj, geo)
 
     def new_project(self):
         name = simpledialog.askstring("新建项目", "项目名字，比如「差旅报销」",
