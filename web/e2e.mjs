@@ -3,6 +3,7 @@ import puppeteer from 'puppeteer-core'
 
 const EDGE = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 const URL = process.env.FB_URL || 'http://localhost:5173/'
+const BRIDGE = process.env.FB_BRIDGE || 'http://127.0.0.1:8765'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const results = []
 const check = (name, ok, extra = '') => {
@@ -36,16 +37,11 @@ await page.goto(URL, { waitUntil: 'networkidle2' })
 
 await page.goto(URL, { waitUntil: 'networkidle2' })
 
-// 先把数据目录认定清楚：bridge 必须只暴露「测试项目」，否则绝不动手
-const BRIDGE = process.env.FB_BRIDGE || 'http://127.0.0.1:8765'
-const names = await page
-  .evaluate(async (u) => {
-    const r = await fetch(u + '/projects')
-    return r.ok ? await r.json() : null
-  }, BRIDGE)
-  .catch(() => null)
-if (!names || names.length !== 1 || names[0] !== '测试项目') {
-  console.error('bridge 暴露的项目是 ' + JSON.stringify(names) + '，必须是只有「测试项目」的临时目录')
+// 数据目录守卫：用 App 里真实看到的项目列表判断（不信浏览器缓存）
+await page.waitForSelector('.tb select option', { timeout: 20000 })
+const opts = await page.$$eval('.tb select option', (els) => els.map((e) => e.value))
+if (opts.length !== 1 || opts[0] !== '测试项目') {
+  console.error('App 里看到的项目是 ' + JSON.stringify(opts) + '，必须是只有「测试项目」的临时目录')
   await browser.close()
   process.exit(2)
 }
@@ -242,10 +238,153 @@ await step('详情栏固定后不选卡片也不消失', async () => {
 await step('顶部不再有状态计数', async () => {
   check('顶部不再有状态计数', (await page.$$('.tb .legend')).length === 0)
 })
+// 容器卡：建容器 → 拖卡进去 → 折叠/展开 → 拖容器带走子卡 → 聚焦
+let contKidId = null
+await step('新建容器', async () => {
+  // 先把详情栏关掉，免得卡片被它盖住点不到
+  await page.click('#d-close').catch(() => {})
+  await page.waitForFunction(() => !document.querySelector('.drawer'), { timeout: 5000 }).catch(() => {})
+  await sleep(300)
+  await page.evaluate(() => {
+    const b2 = [...document.querySelectorAll('.tb button')].find((x) => x.textContent.includes('容器'))
+    b2?.click()
+  })
+  await sleep(600)
+  await page.keyboard.press('Escape')
+  await sleep(300)
+  const c = await page.evaluate(() => {
+    const el = document.querySelector('.card.cont')
+    if (!el) return null
+    const r = el.getBoundingClientRect()
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+  })
+  check('新建容器', !!c && c.w > 80, c ? `${c.w}×${c.h}（屏幕像素）` : '没建出来')
+})
+
+await step('拖卡进容器', async () => {
+  const rect = await page.evaluate(() => {
+    const r = document.querySelector('.card.cont').getBoundingClientRect()
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) }
+  })
+  // 在容器左边双击新建一张卡，位置可预期，再把它拖进容器
+  const spot = { x: Math.max(80, rect.x - 200), y: rect.y + Math.round(rect.h / 2) }
+  await page.mouse.click(spot.x, spot.y, { delay: 10 })
+  await page.mouse.click(spot.x, spot.y, { delay: 10 })
+  await sleep(600)
+  await page.keyboard.press('Escape')
+  await sleep(300)
+  const start = await page.evaluate(() => {
+    const cs = [...document.querySelectorAll('.card')].filter((c) => !c.classList.contains('cont'))
+    const node = cs[cs.length - 1].closest('.react-flow__node')
+    const r = cs[cs.length - 1].getBoundingClientRect()
+    return {
+      id: node.getAttribute('data-id'),
+      x: Math.round(r.x + r.width / 2),
+      y: Math.round(r.y + r.height / 2),
+    }
+  })
+  contKidId = start.id
+  const drop = { x: rect.x + Math.round(rect.w / 2), y: rect.y + Math.round(rect.h / 2) }
+  await page.mouse.move(start.x, start.y)
+  await page.mouse.down()
+  await page.mouse.move(start.x + 30, start.y + 20, { steps: 8 })
+  await page.mouse.move(drop.x, drop.y, { steps: 12 })
+  await page.mouse.up()
+  await sleep(700)
+  const cnt = await page.$eval('.card.cont .ccnt', (e) => e.textContent || '')
+  check('拖卡进容器', cnt.includes('1'), '徽标显示 ' + cnt.trim())
+})
+
+await step('折叠隐藏子卡 / 展开恢复', async () => {
+  const visible = () => page.$$eval('.card', (els) => els.filter((e) => e.offsetParent !== null).length)
+  await page.evaluate(() => {
+    const b2 = [...document.querySelectorAll('.card.cont .cbtn')].find((x) =>
+      x.textContent.includes('折叠'),
+    )
+    b2?.click()
+  })
+  await sleep(600)
+  const folded = await visible()
+  await page.evaluate(() => {
+    const b2 = [...document.querySelectorAll('.card.cont .cbtn')].find((x) =>
+      x.textContent.includes('展开'),
+    )
+    b2?.click()
+  })
+  await sleep(600)
+  const open = await visible()
+  check('折叠隐藏子卡 / 展开恢复', folded === open - 1, `折叠 ${folded} 张，展开 ${open} 张`)
+})
+
+await step('拖容器带着子卡一起走', async () => {
+  // 用保存下来的数据当判据（比测 DOM 稳）
+  const readDoc = () =>
+    page.evaluate(async (u) => {
+      const res = await fetch(u + '/flow?project=' + encodeURIComponent('测试项目') + '&t=' + Date.now(), {
+        cache: 'no-store',
+      })
+      return res.ok ? await res.json() : null
+    }, BRIDGE)
+  const contId = await page.evaluate(
+    () => document.querySelector('.card.cont').closest('.react-flow__node').dataset.id,
+  )
+  const d0 = await readDoc()
+  const c0f = d0?.nodes?.find((n) => n.id === contId)
+  const k0f = d0?.nodes?.find((n) => n.parent === contId)
+  const before = await page.evaluate(() => {
+    const r = document.querySelector('.card.cont').getBoundingClientRect()
+    return { cx: Math.round(r.x + 24), cy: Math.round(r.y + r.height - 14) }
+  })
+  await page.mouse.move(before.cx, before.cy)
+  await page.mouse.down()
+  await page.mouse.move(before.cx + 20, before.cy + 10, { steps: 6 })
+  await page.mouse.move(before.cx + 60, before.cy + 40, { steps: 10 })
+  await page.mouse.up()
+  await sleep(600)
+  // 自动保存是防抖的，多等几轮直到落盘
+  let d1 = null
+  let dcx = 0
+  let dkx = 0
+  for (let i = 0; i < 8; i++) {
+    await sleep(500)
+    d1 = await readDoc()
+    const c1f = d1?.nodes?.find((n) => n.id === contId)
+    const k1f = d1?.nodes?.find((n) => n.parent === contId)
+    dcx = c1f && c0f ? Math.round(c1f.x - c0f.x) : 0
+    dkx = k1f && k0f ? Math.round(k1f.x - k0f.x) : 0
+    if (dcx !== 0 && dcx === dkx) break
+  }
+  check(
+    '拖容器带着子卡一起走',
+    !!c0f && !!k0f && dcx !== 0 && dcx === dkx,
+    `容器 +${dcx}，子卡 +${dkx}`,
+  )
+})
+
+await step('聚焦只留这一组', async () => {
+  await page.evaluate(() => {
+    const b2 = [...document.querySelectorAll('.card.cont .cbtn')].find((x) =>
+      x.textContent.includes('聚焦'),
+    )
+    b2?.click()
+  })
+  await sleep(700)
+  const vis = await page.$$eval('.card', (els) => els.filter((e) => e.offsetParent !== null).length)
+  const chip = Boolean(await page.$('.viewchip.focus'))
+  check('聚焦只留这一组', vis === 2 && chip, `可见 ${vis} 张`)
+  await page.evaluate(() => {
+    document.querySelector('.viewchip.focus button')?.click()
+  })
+  await sleep(500)
+  const all = await page.$$eval('.card', (els) => els.filter((e) => e.offsetParent !== null).length)
+  check('退出聚焦恢复全部', all > vis, `可见 ${all} 张`)
+})
+
+
 
 await step('多选出现排版工具条', async () => {
-  await page.click('#d-close')
-  await page.waitForFunction(() => !document.querySelector('.drawer'), { timeout: 5000 })
+  await page.click('#d-close').catch(() => {})
+  await page.waitForFunction(() => !document.querySelector('.drawer'), { timeout: 5000 }).catch(() => {})
   await sleep(300)
   const cs = await cardCenters()
   await page.mouse.click(cs[0].x, cs[0].y)

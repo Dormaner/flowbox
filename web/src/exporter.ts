@@ -179,6 +179,9 @@ main.drag{cursor:grabbing}
 .card.hl{border-color:#2563eb;box-shadow:0 0 0 3px #e0e7ff,0 6px 18px rgba(37,99,235,.16)}
 .card.dim{opacity:.25}
 .card.hit{border-color:#f59e0b;box-shadow:0 0 0 3px #fef3c7}
+.card.cont{border-style:dashed;border-color:#b9c6e8;background:#f5f8ff;box-shadow:none}
+.num{display:inline-block;min-width:17px;margin-right:5px;color:#8a94a6;font-weight:600;
+ font-size:11.5px;font-variant-numeric:tabular-nums}
 .ct{font-size:13px;font-weight:600;line-height:1.35;max-height:2.7em;overflow:hidden;padding-right:10px}
 .cs{margin-top:3px;font-size:11.5px;line-height:1.4;color:#6b7280;overflow:hidden;
  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
@@ -337,24 +340,39 @@ export async function buildExportHtml(
   const stOf = (n: FlowNode) =>
     statuses.find((s) => s.key === (n.state || statuses[0]?.key)) || statuses[0]
 
+  // 编号：顶层 1 2 3，容器里的子卡 3.1 3.2
+  const topNodes = nodes.filter((n) => !n.parent || !index[n.parent])
+  const numOf: Record<string, string> = {}
+  topNodes.forEach((n, i) => {
+    numOf[n.id] = String(i + 1)
+    nodes
+      .filter((k) => k.parent === n.id)
+      .forEach((k, j) => {
+        numOf[k.id] = `${i + 1}.${j + 1}`
+      })
+  })
+
   const cards = nodes
     .map((n, i) => {
       const st = stOf(n)
       const sz = cardSize(n)
+      const isCont = n.kind === 'container'
+      const kids = nodes.filter((k) => k.parent === n.id).length
       const stats = mdStats(bodyOf(n))
       const sum = String(n.summary || stats.summary || '')
-      const chips = [
-        stats.checks.total ? `${stats.checks.done}/${stats.checks.total} 材料` : '',
-        stats.files.length ? `📎 ${stats.files.length}` : '',
-        stats.owner,
-        stats.due,
-      ]
-        .filter(Boolean)
-        .join(' · ')
+      const chips = isCont
+        ? [`${kids} 步`]
+        : [
+            stats.checks.total ? `${stats.checks.done}/${stats.checks.total} 材料` : '',
+            stats.files.length ? `📎 ${stats.files.length}` : '',
+            stats.owner,
+            stats.due,
+          ]
+      const chipText = chips.filter(Boolean).join(' · ')
       const hay = [n.name, sum, ...(n.fields || []).map((f) => `${f.label} ${fieldText(f)}`)]
         .join(' ')
         .toLowerCase()
-      return `<div class="card" data-k="${i}" data-s="${esc(hay)}" style="left:${n.x + ox}px;top:${n.y + oy}px;width:${sz.w}px;height:${sz.h}px"><div class="ct">${esc(n.name || '未命名')}</div><div class="cs">${esc(sum)}</div>${chips ? `<div class="mini">${esc(chips)}</div>` : ''}<i class="dot" style="background:${esc(st?.color || '#C7CBD1')}"></i></div>`
+      return `<div class="card${isCont ? ' cont' : ''}" data-k="${i}" data-s="${esc(hay)}" style="left:${n.x + ox}px;top:${n.y + oy}px;width:${sz.w}px;height:${sz.h}px"><div class="ct"><b class="num">${numOf[n.id] || ''}</b>${esc(n.name || '未命名')}</div>${isCont ? '' : `<div class="cs">${esc(sum)}</div>`}${chipText ? `<div class="mini">${esc(chipText)}</div>` : ''}<i class="dot" style="background:${esc(st?.color || '#C7CBD1')}"></i></div>`
     })
     .join('')
 
@@ -366,7 +384,7 @@ export async function buildExportHtml(
         ? mdToHtml(body, { resolve: (rel) => images[rel] || '' })
         : (n.fields || []).map((f) => fieldHtml(f, images)).join('')
       const sum = n.summary ? `<div class="psum">${esc(n.summary)}</div>` : ''
-      return `<template id="t${i}"><div class="ptitle">${esc(n.name || '未命名')}</div>${sum}<span class="chip"><i style="background:${esc(st?.color || '#C7CBD1')}"></i>${esc(st?.label || '')}</span><div class="mdview">${html}</div></template>`
+      return `<template id="t${i}"><div class="ptitle"><b class="num">${numOf[n.id] || ''}</b>${esc(n.name || '未命名')}</div>${sum}<span class="chip"><i style="background:${esc(st?.color || '#C7CBD1')}"></i>${esc(st?.label || '')}</span><div class="mdview">${html}</div></template>`
     })
     .join('')
 

@@ -12,6 +12,10 @@ type Ctx = {
   patch: (id: string, patch: Partial<FlowNode>) => void
   cycleState: (id: string) => void
   resize: (id: string, w: number, h: number) => void
+  toggleCollapse: (id: string) => void
+  focusOn: (id: string) => void
+  childCount: (id: string) => number
+  dragContainer: (id: string, e: React.PointerEvent) => void
 }
 
 export const EditorCtx = createContext<Ctx>({
@@ -20,6 +24,10 @@ export const EditorCtx = createContext<Ctx>({
   patch: () => {},
   cycleState: () => {},
   resize: () => {},
+  toggleCollapse: () => {},
+  focusOn: () => {},
+  childCount: () => 0,
+  dragContainer: () => {},
 })
 
 // 新建卡片只自动进一次改名，撤销 / 重做时不要又弹出来
@@ -83,6 +91,74 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
       e.preventDefault()
       commit()
     }
+  }
+
+  if (n.kind === 'container') {
+    const count = Number((data as any).kids ?? ctx.childCount(id))
+    return (
+      <>
+        <NodeResizer
+          isVisible={!!selected}
+          minWidth={MIN_W}
+          minHeight={MIN_H}
+          maxWidth={MAX_W}
+          maxHeight={MAX_H}
+          lineClassName="nl"
+          handleClassName="nh"
+          onResizeEnd={(_e, p) => ctx.resize(id, p.width, p.height)}
+        />
+        <div
+          className={`card cont nodrag${selected ? ' sel' : ''}${n.collapsed ? ' folded' : ''}`}
+          onMouseEnter={() => setHover(id)}
+          onMouseLeave={() => setHover(null)}
+          onPointerDown={(e) => ctx.dragContainer(id, e)}
+        >
+          <div className="chead">
+            <span
+              className="cttl"
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                const v = window.prompt('分组名字', n.name || '新分组')
+                if (v !== null) ctx.patch(id, { name: v.trim() || '新分组' })
+              }}
+              title="双击改名"
+            >
+              {n.name || '新分组'}
+            </span>
+            <span className="ccnt">{count} 步</span>
+            <button
+              className="cbtn nodrag"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                ctx.toggleCollapse(id)
+              }}
+            >
+              {n.collapsed ? '展开' : '折叠'}
+            </button>
+            <button
+              className="cbtn nodrag"
+              onPointerDown={(e) => e.stopPropagation()}
+              onClick={(e) => {
+                e.stopPropagation()
+                ctx.focusOn(id)
+              }}
+            >
+              聚焦
+            </button>
+          </div>
+          <div className="cmini">
+            {n.collapsed
+              ? `${count} 张卡片已折叠`
+              : count
+                ? '卡片会跟着这个框一起走'
+                : '把卡片拖进来'}
+          </div>
+          <Handle type="target" position={Position.Left} className="port left" />
+          <Handle type="source" position={Position.Right} className="port right" />
+        </div>
+      </>
+    )
   }
 
   return (

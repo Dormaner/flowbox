@@ -126,6 +126,7 @@ function Editor() {
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
   const [vp, setVp] = useState({ x: 0, y: 0, zoom: 1 })
   const [drawerW, setDrawerW] = useState(() => Number(localStorage.getItem('fb.drawerW')) || 372)
+  const [focusId, setFocusId] = useState<string | null>(null)
   const [drawerFloat, setDrawerFloat] = useState(false)
   const [drawerPos, setDrawerPos] = useState({ x: Math.max(0, window.innerWidth - 440), y: 88 })
   const [newOpen, setNewOpen] = useState(false)
@@ -258,9 +259,66 @@ function Editor() {
       // 拖边角松手时把最终尺寸写进卡片数据（这样才会被存下来）
       resize: (id: string, w: number, h: number) =>
         patch(id, { w: Math.round(w), h: Math.round(h) }),
+      // 容器：折叠 / 聚焦 / 数子卡
+      toggleCollapse: (id: string) => {
+        const n = nodesRef.current.find((x) => x.id === id)
+        if (!n) return
+        patch(id, { collapsed: !(n.data as any).node.collapsed })
+      },
+      focusOn: (id: string) => setFocusId(id),
+      childCount: (id: string) =>
+        nodesRef.current.filter((x) => ((x.data as any).node as FlowNode).parent === id).length,
+      dragContainer: (id: string, e: React.PointerEvent) => dragContainer(id, e),
     }),
     [statuses, mode, patch, cycleState],
   )
+
+  /** 拖容器：容器和子卡一起平移（自己处理指针，避免和 React Flow 的节点拖拽打架） */
+  const dragContainer = (id: string, e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const ids = new Set([
+      id,
+      ...nodesRef.current
+        .filter((n) => ((n.data as any).node as FlowNode).parent === id)
+        .map((n) => n.id),
+    ])
+    const base = new Map(
+      nodesRef.current
+        .filter((n) => ids.has(n.id))
+        .map((n) => [n.id, { ...n.position }] as [string, { x: number; y: number }]),
+    )
+    if (!base.size) return
+    pushHistory()
+    const start = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    document.body.style.cursor = 'grabbing'
+    const move = (ev: PointerEvent) => {
+      const p = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
+      const dx = p.x - start.x
+      const dy = p.y - start.y
+      setNodes((ns) =>
+        ns.map((n) =>
+          base.has(n.id)
+            ? {
+                ...n,
+                position: {
+                  x: Math.round(base.get(n.id)!.x + dx),
+                  y: Math.round(base.get(n.id)!.y + dy),
+                },
+              }
+            : n,
+        ),
+      )
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.cursor = ''
+      setDirty(true)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
 
   const openProject = useCallback(
     async (name: string) => {
@@ -280,7 +338,7 @@ function Editor() {
             return {
               id: n.id,
               type: 'card',
-              zIndex: 2,
+              zIndex: n.kind === 'container' ? 0 : 2,
               position: { x: n.x, y: n.y },
               data: { node: n },
               width: cardWidth(n),
@@ -397,11 +455,46 @@ function Editor() {
     [pushHistory, rf, setNodes],
   )
 
+  // 新建容器卡：比普通卡大一圈，拖别的卡进它的范围就会成为子卡
+  const addContainer = useCallback(() => {
+    pushHistory()
+    const v = rf.getViewport()
+    const x = Math.round(((-v.x + window.innerWidth / 2) / v.zoom - 190) / 10) * 10
+    const y = Math.round(((-v.y + window.innerHeight / 2) / v.zoom - 130) / 10) * 10
+    const id = 'c' + Math.random().toString(16).slice(2, 10)
+    const node: FlowNode = {
+      id,
+      name: '新分组',
+      summary: '',
+      x,
+      y,
+      w: 380,
+      h: 260,
+      kind: 'container',
+      state: statusesRef.current[0]?.key || 'todo',
+      fields: [],
+    }
+    setNodes((ns) => [
+      ...ns,
+      {
+        id,
+        type: 'card',
+        position: { x, y },
+        data: { node, autoEdit: true },
+        width: cardWidth(node),
+        height: cardHeight(node),
+        zIndex: 0,
+      },
+    ])
+    setSelId(id)
+    setDirty(true)
+  }, [pushHistory, rf, setNodes])
+
   const addNext = useCallback(
     (fromId: string) => {
       const src = nodesRef.current.find((n) => n.id === fromId)
       if (!src) return
-      addNode({ x: src.position.x + cardWidth(src) + 70, y: src.position.y })
+      addNode({ x: src.position.x + (src.width || DEFAULT_W) + 70, y: src.position.y })
     },
     [addNode],
   )
@@ -497,6 +590,7 @@ function Editor() {
         e.preventDefault()
         delSelected()
       } else if (e.key === 'Escape') {
+        setFocusId(null)
         setSelId(null)
       } else if (e.key === 'Enter' && selRef.current) {
         e.preventDefault()
@@ -693,7 +787,35 @@ function Editor() {
     setDirty(true)
   }
 
-  // 拖单张卡片时的横向/竖向/居中对齐参考线
+  // 拖单张卡片时的横向/竖向/居中对齐参考线（容器不靠这套，它自己处理指针）
+  const onDragStart = () => pushHistory()
+
+  // 松手时看这张卡的落点：落在某个容器里就认它当爹，拖出去就解除
+  const settleParent = (id: string) => {
+    const me = nodesRef.current.find((n) => n.id === id)
+    if (!me) return
+    const mf = (me.data as any).node as FlowNode
+    if (mf.kind === 'container') return
+    const cx = me.position.x + cardSize(mf).w / 2
+    const cy = me.position.y + cardSize(mf).h / 2
+    const hit = nodesRef.current.find((o) => {
+      const of = (o.data as any).node as FlowNode
+      if (of.kind !== 'container' || o.id === id) return false
+      const s = cardSize(of)
+      return (
+        cx >= o.position.x && cx <= o.position.x + s.w && cy >= o.position.y && cy <= o.position.y + s.h
+      )
+    })
+    const next = hit?.id
+    if ((mf.parent || undefined) === next) return
+    patch(id, { parent: next })
+  }
+
+  const onDragStop = (_e: any, node: any) => {
+    setGuides({ v: [], h: [] })
+    settleParent(node.id)
+  }
+
   const onNodeDrag = (_e: any, node: any) => {
     if (node.type !== 'card') return
     const others = nodesRef.current.filter((n) => n.id !== node.id)
@@ -753,6 +875,34 @@ function Editor() {
   }, [groups, nodes])
 
   const selected = nodes.filter((n) => n.selected)
+
+  // 容器折叠 / 聚焦：哪些卡现在该藏起来；顺便把子卡数塞进 data，容器才会跟着重渲染
+  const rfNodes = useMemo(() => {
+    const byId = new Map(nodes.map((n) => [n.id, (n.data as any).node as FlowNode]))
+    const kids: Record<string, number> = {}
+    for (const n of nodes) {
+      const p = (byId.get(n.id) as FlowNode)?.parent
+      if (p) kids[p] = (kids[p] || 0) + 1
+    }
+    return nodes.map((n) => {
+      const fn = byId.get(n.id) as FlowNode
+      const parent = fn?.parent ? byId.get(fn.parent) : undefined
+      let hidden = false
+      if (parent?.collapsed) hidden = true
+      if (focusId) hidden = !(n.id === focusId || fn?.parent === focusId)
+      const k = kids[n.id] || 0
+      const isCont = (fn as FlowNode)?.kind === 'container'
+      if (hidden === Boolean(n.hidden) && (n.data as any).kids === k && n.draggable === !isCont)
+        return n
+      return { ...n, hidden, draggable: !isCont, data: { ...n.data, kids: k } }
+    })
+  }, [nodes, focusId])
+
+  const rfEdges = useMemo(() => {
+    if (!rfNodes.some((n) => n.hidden)) return edges
+    const gone = new Set(rfNodes.filter((n) => n.hidden).map((n) => n.id))
+    return edges.filter((e) => !gone.has(e.source) && !gone.has(e.target))
+  }, [edges, rfNodes])
 
   const align = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
     if (selected.length < 2) return
@@ -852,6 +1002,9 @@ function Editor() {
           <button onClick={() => addNode()} title="Ctrl+N">
             ＋ 卡片
           </button>
+          <button onClick={addContainer} title="新建一个容器，把别的卡拖进去">
+            ＋ 容器
+          </button>
           <div className="group">
             <button onClick={undo} title="Ctrl+Z">
               撤销
@@ -875,8 +1028,8 @@ function Editor() {
         <div className="main">
           <div className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
             <ReactFlow
-              nodes={nodes}
-              edges={edges}
+              nodes={rfNodes}
+              edges={rfEdges}
               onNodesChange={onNodesChange2}
               onEdgesChange={onEdgesChange}
               nodeTypes={nodeTypes}
@@ -887,12 +1040,9 @@ function Editor() {
               elementsSelectable
               onNodeClick={(_, n) => setSelId(n.id)}
               onPaneClick={onPaneClick}
-              onNodeDragStart={pushHistory}
+              onNodeDragStart={onDragStart}
               onNodeDrag={onNodeDrag}
-              onNodeDragStop={() => {
-                setGuides({ v: [], h: [] })
-                setDirty(true)
-              }}
+              onNodeDragStop={onDragStop}
               onNodesDelete={() => setDirty(true)}
               onEdgesDelete={() => setDirty(true)}
               onMove={(_, v) => {
@@ -995,6 +1145,12 @@ function Editor() {
               <div className="viewchip">
                 预览模式 · 点卡片看详情
                 <button onClick={() => setMode('edit')}>切回编辑</button>
+              </div>
+            ) : null}
+            {focusId ? (
+              <div className="viewchip focus">
+                已聚焦 · 只显示这一组
+                <button onClick={() => setFocusId(null)}>退出聚焦</button>
               </div>
             ) : null}
           </div>

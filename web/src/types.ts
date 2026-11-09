@@ -20,6 +20,12 @@ export type FlowNode = {
   w?: number
   /** 卡片高度（不设 = 按内容自适应） */
   h?: number
+  /** 容器卡：可以把别的卡片装进来，一起折叠/移动 */
+  kind?: 'step' | 'container'
+  /** 所属容器 id（拖进容器里自动设置） */
+  parent?: string
+  /** 容器是否折叠（折叠时子卡不显示） */
+  collapsed?: boolean
   /** 老数据：字段数组，加载时会转成 body */
   fields?: Field[]
 }

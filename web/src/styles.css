@@ -846,6 +846,49 @@ button:hover:disabled { background: transparent; }
   z-index: 8;
 }
 .viewchip button { color: var(--accent); font-weight: 600; }
+.viewchip.focus { bottom: 54px; }
+
+/* ---------------- 容器卡 ---------------- */
+.card.cont {
+  background: color-mix(in srgb, #eef2ff 55%, #fff);
+  border: 1.5px dashed #b9c6e8;
+  box-shadow: none;
+}
+.card.cont:hover { box-shadow: 0 6px 18px rgba(37, 99, 235, 0.1); }
+.card.cont.sel { border-color: var(--accent); box-shadow: 0 0 0 3px #e0e7ff; }
+.card.cont .chead { display: flex; align-items: center; gap: 6px; }
+.card.cont .cttl {
+  flex: 1;
+  min-width: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #33415c;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: text;
+}
+.card.cont .ccnt {
+  font-size: 10.5px;
+  color: #6b7a95;
+  background: #fff;
+  border-radius: 20px;
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+.card.cont .cbtn {
+  border: 1px solid #c9d4ea;
+  background: #fff;
+  color: #51607a;
+  font-size: 10.5px;
+  border-radius: 6px;
+  padding: 1px 6px;
+  cursor: pointer;
+  flex: none;
+}
+.card.cont .cbtn:hover { border-color: var(--accent); color: var(--accent); }
+.card.cont .cmini { margin-top: 6px; font-size: 10.5px; color: #93a0b8; }
+.card.cont.folded { background: #fff; }
 
 /* 分组设置的小面板 */
 .gmask { position: fixed; inset: 0; z-index: 70; }
