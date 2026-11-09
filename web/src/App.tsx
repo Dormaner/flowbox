@@ -12,6 +12,7 @@ import {
   addEdge,
   EdgeLabelRenderer,
   Panel,
+  ViewportPortal,
   type Connection,
   type Edge,
   type EdgeProps,
@@ -35,17 +36,7 @@ import {
 import { isImageFile, uploadFile } from './assets'
 import { buildExportHtml } from './exporter'
 
-const nodeTypes = { card: CardNode, group: GroupBox }
-
-/** 分组框：只是背景，不参与拖动和选中 */
-function GroupBox({ data }: NodeProps) {
-  const d = data as any
-  return (
-    <div className="groupbox" style={{ background: d.color || '#EAF1FE' }}>
-      <span>{d.name}</span>
-    </div>
-  )
-}
+const nodeTypes = { card: CardNode }
 
 function FlowEdge({
   id,
@@ -122,6 +113,9 @@ function Editor() {
   const hoverCtx = useMemo(() => ({ hover, setHover }), [hover])
   const [mode, setMode] = useState<'edit' | 'view'>('edit')
   const [groups, setGroups] = useState<Group[]>([])
+  const [gEdit, setGEdit] = useState<{ id: string; x: number; y: number } | null>(null)
+  const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] })
+  const [vp, setVp] = useState({ x: 0, y: 0, zoom: 1 })
   const [drawerW, setDrawerW] = useState(() => Number(localStorage.getItem('fb.drawerW')) || 372)
   const [drawerFloat, setDrawerFloat] = useState(false)
   const [drawerPos, setDrawerPos] = useState({ x: Math.max(0, window.innerWidth - 440), y: 88 })
@@ -139,6 +133,8 @@ function Editor() {
   statusesRef.current = statuses
   const groupsRef = useRef(groups)
   groupsRef.current = groups
+  const modeRef = useRef(mode)
+  modeRef.current = mode
   const selRef = useRef<string | null>(null)
   selRef.current = selId
 
@@ -221,6 +217,7 @@ function Editor() {
           (doc.nodes || []).map((n) => ({
             id: n.id,
             type: 'card',
+            zIndex: 2,
             position: { x: n.x, y: n.y },
             data: { node: n },
             style: { width: CARD_W, height: CARD_H },
@@ -325,6 +322,7 @@ function Editor() {
           position: { x, y },
           data: { node, autoEdit: true },
           style: { width: CARD_W, height: CARD_H },
+          zIndex: 2,
         },
       ])
       setSelId(id)
@@ -591,10 +589,117 @@ function Editor() {
     }
   }
 
-  // 分组框从卡片位置实时算出来，不单独存坐标
-  const rfNodes = useMemo(() => {
+  const startGroupDrag = (gid: string, e: React.PointerEvent) => {
+    if (modeRef.current !== 'edit') return
+    const g = groupsRef.current.find((x) => x.id === gid)
+    if (!g) return
+    e.preventDefault()
+    e.stopPropagation()
+    const start = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    const base = new Map(
+      nodesRef.current
+        .filter((n) => g.members.includes(n.id))
+        .map((n) => [n.id, { ...n.position }] as [string, { x: number; y: number }]),
+    )
+    if (!base.size) return
+    pushHistory()
+    document.body.style.cursor = 'grabbing'
+    const move = (ev: PointerEvent) => {
+      const p = rf.screenToFlowPosition({ x: ev.clientX, y: ev.clientY })
+      const dx = p.x - start.x
+      const dy = p.y - start.y
+      setNodes((ns) =>
+        ns.map((n) =>
+          base.has(n.id)
+            ? {
+                ...n,
+                position: {
+                  x: Math.round(base.get(n.id)!.x + dx),
+                  y: Math.round(base.get(n.id)!.y + dy),
+                },
+              }
+            : n,
+        ),
+      )
+    }
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.cursor = ''
+      setDirty(true)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  const gEditAt = useRef(0)
+
+  const openGroupEdit = (gid: string, e: React.PointerEvent) => {
+    ;(window as any).__ge = ((window as any).__ge || 0) + 1
+    if (modeRef.current !== 'edit') return
+    gEditAt.current = Date.now()
+    setGEdit({ id: gid, x: e.clientX, y: e.clientY })
+  }
+
+  const patchGroup = (gid: string, patch: Partial<Group>) => {
+    pushHistory()
+    setGroups((gs) => gs.map((g) => (g.id === gid ? { ...g, ...patch } : g)))
+    setDirty(true)
+  }
+
+  const removeGroup = (gid: string) => {
+    pushHistory()
+    setGroups((gs) => gs.filter((g) => g.id !== gid))
+    setGEdit(null)
+    setDirty(true)
+  }
+
+  // 拖单张卡片时的横向/竖向/居中对齐参考线
+  const onNodeDrag = (_e: any, node: any) => {
+    if (node.type !== 'card') return
+    const others = nodesRef.current.filter((n) => n.id !== node.id)
+    const sx = [node.position.x, node.position.x + CARD_W / 2, node.position.x + CARD_W]
+    const sy = [node.position.y, node.position.y + CARD_H / 2, node.position.y + CARD_H]
+    let bx: { diff: number; at: number } | null = null
+    let by: { diff: number; at: number } | null = null
+    for (const o of others) {
+      const ox = [o.position.x, o.position.x + CARD_W / 2, o.position.x + CARD_W]
+      const oy = [o.position.y, o.position.y + CARD_H / 2, o.position.y + CARD_H]
+      for (const a of sx) {
+        for (const b of ox) {
+          const d = b - a
+          if (Math.abs(d) <= 6 && (!bx || Math.abs(d) < Math.abs(bx.diff))) bx = { diff: d, at: b }
+        }
+      }
+      for (const a of sy) {
+        for (const b of oy) {
+          const d = b - a
+          if (Math.abs(d) <= 6 && (!by || Math.abs(d) < Math.abs(by.diff))) by = { diff: d, at: b }
+        }
+      }
+    }
+    if (bx || by) {
+      setNodes((ns) =>
+        ns.map((n) =>
+          n.id === node.id
+            ? {
+                ...n,
+                position: {
+                  x: Math.round(n.position.x + (bx?.diff || 0)),
+                  y: Math.round(n.position.y + (by?.diff || 0)),
+                },
+              }
+            : n,
+        ),
+      )
+    }
+    setGuides({ v: bx ? [bx.at] : [], h: by ? [by.at] : [] })
+  }
+
+  // 分组框：坐标从成员卡片算，按当前缩放/平移换算成屏幕坐标
+  const groupRects = useMemo(() => {
     const byId = new Map(nodes.map((n) => [n.id, n]))
-    const boxes = groups
+    return groups
       .map((g) => {
         const mem = g.members.map((id) => byId.get(id)).filter(Boolean) as any[]
         if (!mem.length) return null
@@ -602,21 +707,10 @@ function Editor() {
         const y1 = Math.min(...mem.map((m) => m.position.y)) - 34
         const x2 = Math.max(...mem.map((m) => m.position.x + CARD_W)) + 16
         const y2 = Math.max(...mem.map((m) => m.position.y + CARD_H)) + 16
-        return {
-          id: 'g:' + g.id,
-          type: 'group',
-          position: { x: x1, y: y1 },
-          data: { name: g.name, color: g.color || '#EAF1FE' },
-          style: { width: x2 - x1, height: y2 - y1 },
-          draggable: false,
-          selectable: false,
-          connectable: false,
-          zIndex: -1,
-        } as Node
+        return { g, x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
       })
-      .filter(Boolean) as Node[]
-    return [...boxes, ...nodes]
-  }, [nodes, groups])
+      .filter(Boolean) as { g: Group; x: number; y: number; w: number; h: number }[]
+  }, [groups, nodes])
 
   const selected = nodes.filter((n) => n.selected)
 
@@ -745,24 +839,6 @@ function Editor() {
             })}
           </span>
           <span className="sp" />
-          <div className="group">
-            <button
-              id="m-edit"
-              className={mode === 'edit' ? 'on' : ''}
-              onClick={() => setMode('edit')}
-              title="Ctrl+E"
-            >
-              编辑
-            </button>
-            <button
-              id="m-view"
-              className={mode === 'view' ? 'on' : ''}
-              onClick={() => setMode('view')}
-              title="Ctrl+E"
-            >
-              预览
-            </button>
-          </div>
           <button id="m-export" onClick={doExport} title="导出一份只读网页">
             导出网页
           </button>
@@ -772,7 +848,7 @@ function Editor() {
         <div className="main">
           <div className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
             <ReactFlow
-              nodes={rfNodes}
+              nodes={nodes}
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
@@ -785,10 +861,17 @@ function Editor() {
               onNodeClick={(_, n) => setSelId(n.id)}
               onPaneClick={onPaneClick}
               onNodeDragStart={pushHistory}
-              onNodeDragStop={() => setDirty(true)}
+              onNodeDrag={onNodeDrag}
+              onNodeDragStop={() => {
+                setGuides({ v: [], h: [] })
+                setDirty(true)
+              }}
               onNodesDelete={() => setDirty(true)}
               onEdgesDelete={() => setDirty(true)}
-              onMove={(_, v) => setZoom(Math.round(v.zoom * 100))}
+              onMove={(_, v) => {
+                setZoom(Math.round(v.zoom * 100))
+                setVp({ x: v.x, y: v.y, zoom: v.zoom })
+              }}
               deleteKeyCode={null}
               minZoom={0.15}
               maxZoom={2.6}
@@ -803,6 +886,22 @@ function Editor() {
             >
               <Background id="big" variant={BackgroundVariant.Lines} gap={110} color="#e4e8ec" lineWidth={1} />
               <Background id="small" variant={BackgroundVariant.Lines} gap={22} color="#eef1f4" lineWidth={1} />
+              <ViewportPortal>
+                {guides.v.map((x, i) => (
+                  <div
+                    key={'gv' + i}
+                    className="guide v"
+                    style={{ left: x, top: -4000, height: 8000 }}
+                  />
+                ))}
+                {guides.h.map((y, i) => (
+                  <div
+                    key={'gh' + i}
+                    className="guide h"
+                    style={{ top: y, left: -4000, width: 8000 }}
+                  />
+                ))}
+              </ViewportPortal>
               {mode === 'edit' && selected.length >= 2 ? (
                 <Panel position="top-center" className="selbar">
                   <button onClick={() => align('left')} title="左对齐">⇤</button>
@@ -830,10 +929,47 @@ function Editor() {
                 style={{ width: 140, height: 90 }}
               />
             </ReactFlow>
+            <div className="grouplayer">
+              {groupRects.map(({ g, x, y, w, h }) => (
+                <div
+                  key={g.id}
+                  className="gbox"
+                  style={{
+                    left: x * vp.zoom + vp.x,
+                    top: y * vp.zoom + vp.y,
+                    width: w * vp.zoom,
+                    height: h * vp.zoom,
+                    background: `color-mix(in srgb, ${g.color || '#EAF1FE'} 45%, transparent)`,
+                  }}
+                >
+                  <div
+                    className="gtop"
+                    onPointerDown={(e) => startGroupDrag(g.id, e)}
+                    title="拖动整组"
+                  >
+                    <span
+                      className="gname"
+                      onPointerDown={(e) => {
+                        e.stopPropagation()
+                        openGroupEdit(g.id, e)
+                      }}
+                    >
+                      {g.name}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
             <div className="hint">
               双击空白新建 · 双击卡片就地改名 · 从右侧圆点拖到另一张连线 · 滚轮缩放 · 中键拖动平移 · Ctrl+Z
               撤销
             </div>
+            {mode === 'view' ? (
+              <div className="viewchip">
+                预览模式 · 点卡片看详情
+                <button onClick={() => setMode('edit')}>切回编辑</button>
+              </div>
+            ) : null}
           </div>
 
           {sel ? (
@@ -842,6 +978,7 @@ function Editor() {
               statuses={statuses}
               project={project}
               mode={mode}
+              onMode={setMode}
               width={drawerW}
               onWidth={(w) => {
                 setDrawerW(w)
@@ -895,6 +1032,50 @@ function Editor() {
               </div>
             </div>
           </div>
+        ) : null}
+        {gEdit ? (
+          <>
+            <div
+              className="gmask"
+              onClick={() => {
+                if (Date.now() - gEditAt.current > 250) setGEdit(null)
+              }}
+            />
+            <div
+              className="gedit"
+              style={{
+                left: Math.min(gEdit.x + 8, window.innerWidth - 240),
+                top: Math.min(gEdit.y + 8, window.innerHeight - 160),
+              }}
+            >
+              <input
+                className="gnameinput"
+                defaultValue={groups.find((g) => g.id === gEdit.id)?.name || ''}
+                onBlur={(e) => patchGroup(gEdit.id, { name: e.target.value.trim() || '分组' })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
+                }}
+              />
+              <div className="gcolors">
+                {['#EAF1FE', '#E8F5EC', '#FDF1E3', '#F3EDFB', '#FDE8E8', '#EEF0F2'].map((c) => (
+                  <span
+                    key={c}
+                    className={
+                      'gdot' + (groups.find((g) => g.id === gEdit.id)?.color === c ? ' on' : '')
+                    }
+                    style={{ background: c }}
+                    onClick={() => patchGroup(gEdit.id, { color: c })}
+                  />
+                ))}
+              </div>
+              <div className="gfoot">
+                <button className="danger" onClick={() => removeGroup(gEdit.id)}>
+                  删除分组
+                </button>
+                <button onClick={() => setGEdit(null)}>完成</button>
+              </div>
+            </div>
+          </>
         ) : null}
       </div>
       </HoverCtx.Provider>

@@ -53,6 +53,7 @@ type Props = {
   statuses: Status[]
   project: string
   mode: 'edit' | 'view'
+  onMode: (m: 'edit' | 'view') => void
   width: number
   onWidth: (w: number) => void
   float: boolean
@@ -69,6 +70,7 @@ export default function Drawer({
   statuses,
   project,
   mode,
+  onMode,
   width,
   onWidth,
   float,
@@ -112,7 +114,7 @@ export default function Drawer({
   }
   const addField = (type: string) => {
     setPicking(false)
-    setFields([...fields, { type, label: labelOf(type), value: blankValue(type) }])
+    setFields([...fields, { type, label: '', value: blankValue(type) }])
   }
 
   const startResize = (e: React.PointerEvent) => {
@@ -162,7 +164,24 @@ export default function Drawer({
         onPointerDown={startDrag}
         style={{ cursor: float ? 'move' : 'default' }}
       >
-        <span>{edit ? '卡片 · 编辑' : '卡片 · 预览'}</span>
+        <div className="modesw">
+          <button
+            id="m-edit"
+            className={edit ? 'on' : ''}
+            onClick={() => onMode('edit')}
+            title="编辑（Ctrl+E）"
+          >
+            编辑
+          </button>
+          <button
+            id="m-view"
+            className={!edit ? 'on' : ''}
+            onClick={() => onMode('view')}
+            title="预览（Ctrl+E）"
+          >
+            预览
+          </button>
+        </div>
         <span className="sp" />
         <button
           title={float ? '停靠到右侧' : '变成浮动窗口（可拖动）'}
@@ -215,69 +234,80 @@ export default function Drawer({
           </div>
         </div>
 
-        {fields.map((f, i) => (
-          <div className="dfield" key={node.id + ':' + i}>
-            <div className="fl">
+        {fields.map((f, i) => {
+          const typeLabel = FIELD_TYPES.find((t) => t.type === (f.type || 'text'))?.label || ''
+          const label = (f.label || '').trim()
+          const showLabel = edit || (label !== '' && label !== typeLabel)
+          return (
+            <div className="dfield" key={node.id + ':' + i}>
+              {showLabel ? (
+                <div className="fl">
+                  {edit ? (
+                    <input
+                      className="fname"
+                      defaultValue={f.label}
+                      key={node.id + ':' + i + ':' + f.label}
+                      placeholder="字段名"
+                      onBlur={(e) => renameField(i, e.target.value)}
+                    />
+                  ) : (
+                    <span className="flabel">{label}</span>
+                  )}
+                  {edit ? (
+                    <>
+                      <select
+                        className="ftype"
+                        value={f.type || 'text'}
+                        onChange={(e) => retypeField(i, e.target.value)}
+                        title="换类型（旧值会尽量带过去）"
+                      >
+                        {FIELD_TYPES.map((t) => (
+                          <option key={t.type} value={t.type}>
+                            {t.label}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        className="mini"
+                        disabled={i === 0}
+                        onClick={() => moveField(i, -1)}
+                        title="上移"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        className="mini"
+                        disabled={i === fields.length - 1}
+                        onClick={() => moveField(i, 1)}
+                        title="下移"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        className="mini danger"
+                        onClick={() => deleteField(i)}
+                        title="删除字段"
+                      >
+                        ✕
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
               {edit ? (
-                <input
-                  className="fname"
-                  defaultValue={f.label}
-                  key={node.id + ':' + i + ':' + f.label}
-                  placeholder="字段名"
-                  onBlur={(e) => renameField(i, e.target.value)}
+                <FieldEdit
+                  field={f}
+                  project={project}
+                  nodeId={node.id}
+                  onChange={(v, extra) => putField(i, v, extra)}
+                  onError={onToast}
                 />
               ) : (
-                <span className="flabel">{f.label || '未命名字段'}</span>
+                <FieldView field={f} project={project} />
               )}
-              {edit ? (
-                <>
-                  <select
-                    className="ftype"
-                    value={f.type || 'text'}
-                    onChange={(e) => retypeField(i, e.target.value)}
-                    title="换类型（旧值会尽量带过去）"
-                  >
-                    {FIELD_TYPES.map((t) => (
-                      <option key={t.type} value={t.type}>
-                        {t.label}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    className="mini"
-                    disabled={i === 0}
-                    onClick={() => moveField(i, -1)}
-                    title="上移"
-                  >
-                    ↑
-                  </button>
-                  <button
-                    className="mini"
-                    disabled={i === fields.length - 1}
-                    onClick={() => moveField(i, 1)}
-                    title="下移"
-                  >
-                    ↓
-                  </button>
-                  <button className="mini danger" onClick={() => deleteField(i)} title="删除字段">
-                    ✕
-                  </button>
-                </>
-              ) : null}
             </div>
-            {edit ? (
-              <FieldEdit
-                field={f}
-                project={project}
-                nodeId={node.id}
-                onChange={(v, extra) => putField(i, v, extra)}
-                onError={onToast}
-              />
-            ) : (
-              <FieldView field={f} project={project} />
-            )}
-          </div>
-        ))}
+          )
+        })}
 
         {edit ? (
           <>

@@ -149,7 +149,7 @@ check('左对齐生效', dup >= 1, xs.join(','))
 
 await page.click('.selbar button[title="把选中的卡片装进一个分组框"]')
 await sleep(400)
-check('成组出现分组框', Boolean(await page.$('.groupbox')))
+check('成组出现分组框', Boolean(await page.$('.gbox')))
 
 await page.keyboard.press('Escape')
 await sleep(150)

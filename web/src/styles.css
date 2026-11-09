@@ -508,23 +508,43 @@ button:hover:disabled { background: transparent; }
 }
 .vbtn:hover { background: #1d4ed8; }
 
-/* 分组框 */
-.groupbox {
-  width: 100%;
-  height: 100%;
-  border: 1px solid #c9d6ea;
-  border-radius: 14px;
-  position: relative;
-  pointer-events: none;
-}
-.groupbox span {
+/* 分组浮层：整块透明，只有顶部条能拖 */
+.grouplayer {
   position: absolute;
-  left: 10px;
-  top: 4px;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9;
+  overflow: hidden;
+}
+.gbox {
+  position: absolute;
+  border-radius: 14px;
+  pointer-events: none;
+  transition: background 0.15s;
+}
+.gtop {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding-left: 8px;
+  pointer-events: auto;
+  cursor: move;
+}
+.gname {
   font-size: 11px;
   font-weight: 600;
   color: #5b6b82;
+  background: rgba(255, 255, 255, 0.78);
+  padding: 1px 7px;
+  border-radius: 6px;
+  cursor: pointer;
+  pointer-events: auto;
 }
+.gname:hover { background: #fff; color: #2563eb; }
 
 /* 多选后的排版工具条 */
 .selbar {
@@ -576,7 +596,26 @@ button:hover:disabled { background: transparent; }
   box-shadow: 0 18px 50px rgba(16, 24, 40, 0.22);
 }
 
-/* 图片：占满一行，名字在右下角，按钮悬停出现 */
+/* 详情窗标题栏里的 编辑/预览 */
+.modesw {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 8px;
+  background: #f2f3f5;
+}
+.modesw button {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 6px;
+  color: #6b7280;
+}
+.modesw button.on {
+  background: #fff;
+  color: #1f2329;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
+}
 .imgcell { position: relative; margin-bottom: 6px; }
 .imgrow { position: relative; }
 .imgsrc {
@@ -621,6 +660,68 @@ button:hover:disabled { background: transparent; }
 
 .linktest { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
 .linkkind { font-size: 10.5px; color: #9aa1aa; }
+
+/* 拖动时的对齐参考线 */
+.guide { position: absolute; background: #f43f5e; z-index: 6; pointer-events: none; }
+.guide.v { width: 1px; }
+.guide.h { height: 1px; }
+
+/* 预览模式提示 */
+.viewchip {
+  position: absolute;
+  left: 50%;
+  bottom: 14px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px 6px 14px;
+  font-size: 12px;
+  color: #3f4652;
+  background: #fff;
+  border: 1px solid #e6e8eb;
+  border-radius: 20px;
+  box-shadow: 0 6px 20px rgba(16, 24, 40, 0.1);
+  z-index: 8;
+}
+.viewchip button { color: var(--accent); font-weight: 600; }
+
+/* 分组设置的小面板 */
+.gmask { position: fixed; inset: 0; z-index: 70; }
+.gedit {
+  position: fixed;
+  z-index: 71;
+  width: 220px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid #e6e8eb;
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(16, 24, 40, 0.18);
+}
+.gnameinput {
+  width: 100%;
+  font: inherit;
+  font-size: 13px;
+  padding: 5px 7px;
+  border: 1px solid #e6e8eb;
+  border-radius: 7px;
+  background: #f9fafb;
+  outline: none;
+}
+.gnameinput:focus { border-color: #c7d2fe; background: #fff; }
+.gcolors { display: flex; gap: 6px; margin-top: 8px; }
+.gdot {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  border: 1px solid rgba(16, 24, 40, 0.08);
+  cursor: pointer;
+}
+.gdot.on { box-shadow: 0 0 0 2px #2563eb; }
+.gfoot { display: flex; justify-content: space-between; margin-top: 10px; }
+.gfoot button { font-size: 12px; padding: 4px 8px; }
+.gfoot .danger { color: #b91c1c; }
+.gfoot .danger:hover { background: #fef2f2; }
 .modal-mask {
   position: fixed;
   inset: 0;
