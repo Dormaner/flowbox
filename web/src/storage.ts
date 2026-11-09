@@ -1,4 +1,5 @@
 import type { Doc } from './types'
+import { parseLink } from './fields'
 
 // 桌面版走 Tauri 命令；在浏览器里调试时走本地 bridge.py（同样四个动作）
 const API = 'http://127.0.0.1:8765'
@@ -108,5 +109,24 @@ export async function openAsset(project: string, rel: string): Promise<void> {
     return
   }
   await cmd('open_asset', { project, path: rel })
+}
+
+/** 打开超链接：网址走浏览器，本地路径（C:\ / \\server\ / file://）交给系统 */
+export async function openUrl(raw: string): Promise<void> {
+  const { kind, href } = parseLink(raw)
+  if (kind === 'empty') return
+  if (kind === 'path') {
+    if (isDesktop) {
+      await cmd('open_path', { path: href })
+    } else {
+      window.open(`file:///${href.replace(/\\/g, '/')}`, '_blank')
+    }
+    return
+  }
+  if (isDesktop) {
+    await cmd('open_url', { url: href })
+  } else {
+    window.open(href, '_blank')
+  }
 }
 

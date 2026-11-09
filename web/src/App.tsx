@@ -11,16 +11,18 @@ import {
   useReactFlow,
   addEdge,
   EdgeLabelRenderer,
+  Panel,
   type Connection,
   type Edge,
   type EdgeProps,
   type Node,
+  type NodeProps,
 } from '@xyflow/react'
 import CardNode, { EditorCtx } from './CardNode'
 import Drawer from './Drawer'
 import { HoverCtx } from './hover'
 import { CARD_W, CARD_H, bezierAt, edgePath, pathMid } from './geometry'
-import { DEFAULT_STATUSES, type Doc, type FlowNode, type Status } from './types'
+import { DEFAULT_STATUSES, type Doc, type FlowNode, type Group, type Status } from './types'
 import {
   createProject,
   isDesktop,
@@ -33,7 +35,17 @@ import {
 import { isImageFile, uploadFile } from './assets'
 import { buildExportHtml } from './exporter'
 
-const nodeTypes = { card: CardNode }
+const nodeTypes = { card: CardNode, group: GroupBox }
+
+/** 分组框：只是背景，不参与拖动和选中 */
+function GroupBox({ data }: NodeProps) {
+  const d = data as any
+  return (
+    <div className="groupbox" style={{ background: d.color || '#EAF1FE' }}>
+      <span>{d.name}</span>
+    </div>
+  )
+}
 
 function FlowEdge({
   id,
@@ -94,7 +106,7 @@ function FlowEdge({
 }
 const edgeTypes = { fb: FlowEdge }
 
-type Snap = { nodes: Node[]; edges: Edge[] }
+type Snap = { nodes: Node[]; edges: Edge[]; groups: Group[] }
 
 function Editor() {
   const [project, setProject] = useState('')
@@ -109,6 +121,10 @@ function Editor() {
   const [hover, setHover] = useState<string | null>(null)
   const hoverCtx = useMemo(() => ({ hover, setHover }), [hover])
   const [mode, setMode] = useState<'edit' | 'view'>('edit')
+  const [groups, setGroups] = useState<Group[]>([])
+  const [drawerW, setDrawerW] = useState(() => Number(localStorage.getItem('fb.drawerW')) || 372)
+  const [drawerFloat, setDrawerFloat] = useState(false)
+  const [drawerPos, setDrawerPos] = useState({ x: Math.max(0, window.innerWidth - 440), y: 88 })
   const [newOpen, setNewOpen] = useState(false)
   const [newName, setNewName] = useState('')
   const [newTpl, setNewTpl] = useState('blank')
@@ -121,6 +137,8 @@ function Editor() {
   edgesRef.current = edges
   const statusesRef = useRef(statuses)
   statusesRef.current = statuses
+  const groupsRef = useRef(groups)
+  groupsRef.current = groups
   const selRef = useRef<string | null>(null)
   selRef.current = selId
 
@@ -130,6 +148,7 @@ function Editor() {
   const snap = (): Snap => ({
     nodes: JSON.parse(JSON.stringify(nodesRef.current)),
     edges: JSON.parse(JSON.stringify(edgesRef.current)),
+    groups: JSON.parse(JSON.stringify(groupsRef.current)),
   })
   const pushHistory = useCallback(() => {
     past.current.push(JSON.stringify(snap()))
@@ -141,6 +160,7 @@ function Editor() {
     const d = JSON.parse(s) as Snap
     setNodes(d.nodes)
     setEdges(d.edges)
+    setGroups(d.groups || [])
     setDirty(true)
   }
   const undo = useCallback(() => {
@@ -217,6 +237,7 @@ function Editor() {
         )
         past.current = []
         future.current = []
+        setGroups(doc.groups || [])
         setSelId(null)
         setDirty(false)
         setMsg(`${name} · ${doc.nodes?.length || 0} 步`)
@@ -259,7 +280,7 @@ function Editor() {
           label: ((e.data as any)?.label as string) || '',
         })),
         statuses: statusesRef.current,
-        groups: [],
+        groups: groupsRef.current,
       }
       try {
         await saveProject(project, doc)
@@ -337,6 +358,7 @@ function Editor() {
 
   const onConnect = useCallback(
     (c: Connection) => {
+      if (mode !== 'edit') return
       if (!c.source || !c.target || c.source === c.target) return
       pushHistory()
       setEdges((es) =>
@@ -352,7 +374,7 @@ function Editor() {
       )
       setDirty(true)
     },
-    [pushHistory, setEdges],
+    [pushHistory, setEdges, mode],
   )
 
   const lastPane = useRef({ t: 0, x: 0, y: 0 })
@@ -360,6 +382,10 @@ function Editor() {
   const onPaneClick = (e: React.MouseEvent) => {
     // 自己数双击：React Flow 的 pane 会吃掉原生 dblclick，detail 也不一定可靠
     ;(window as any).__pc = ((window as any).__pc || 0) + 1
+    if (mode !== 'edit') {
+      setSelId(null)
+      return
+    }
     const now = Date.now()
     const dist = Math.hypot(e.clientX - lastPane.current.x, e.clientY - lastPane.current.y)
     const dbl = now - lastPane.current.t < 400 && dist < 12
@@ -402,6 +428,10 @@ function Editor() {
         return
       }
       if (typing) return
+      if (mode !== 'edit') {
+        if (e.key === 'Escape') setSelId(null)
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
         delSelected()
@@ -414,7 +444,7 @@ function Editor() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [undo, redo, addNode, addNext, delSelected])
+  }, [undo, redo, addNode, addNext, delSelected, mode])
 
   const baseName = (rel: string) => (rel.split(/[\\/]/).pop() || rel).replace(/\.[^.]+$/, '')
 
@@ -468,6 +498,10 @@ function Editor() {
     const files = Array.from(e.dataTransfer?.files || [])
     if (!files.length) return
     e.preventDefault()
+    if (mode !== 'edit') {
+      setMsg('预览模式下不能改内容，切回编辑再拖')
+      return
+    }
     const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
     const hit = nodesRef.current.find((n) => {
       const x = n.position.x
@@ -544,7 +578,7 @@ function Editor() {
         label: ((e.data as any)?.label as string) || '',
       })),
       statuses: statusesRef.current,
-      groups: [],
+      groups: groupsRef.current,
     }
     try {
       setMsg('正在生成…')
@@ -555,6 +589,111 @@ function Editor() {
     } catch (e: any) {
       setMsg('导出失败：' + (e?.message || e))
     }
+  }
+
+  // 分组框从卡片位置实时算出来，不单独存坐标
+  const rfNodes = useMemo(() => {
+    const byId = new Map(nodes.map((n) => [n.id, n]))
+    const boxes = groups
+      .map((g) => {
+        const mem = g.members.map((id) => byId.get(id)).filter(Boolean) as any[]
+        if (!mem.length) return null
+        const x1 = Math.min(...mem.map((m) => m.position.x)) - 16
+        const y1 = Math.min(...mem.map((m) => m.position.y)) - 34
+        const x2 = Math.max(...mem.map((m) => m.position.x + CARD_W)) + 16
+        const y2 = Math.max(...mem.map((m) => m.position.y + CARD_H)) + 16
+        return {
+          id: 'g:' + g.id,
+          type: 'group',
+          position: { x: x1, y: y1 },
+          data: { name: g.name, color: g.color || '#EAF1FE' },
+          style: { width: x2 - x1, height: y2 - y1 },
+          draggable: false,
+          selectable: false,
+          connectable: false,
+          zIndex: -1,
+        } as Node
+      })
+      .filter(Boolean) as Node[]
+    return [...boxes, ...nodes]
+  }, [nodes, groups])
+
+  const selected = nodes.filter((n) => n.selected)
+
+  const align = (kind: 'left' | 'hcenter' | 'right' | 'top' | 'vcenter' | 'bottom') => {
+    if (selected.length < 2) return
+    pushHistory()
+    const xs = selected.map((n) => n.position.x)
+    const ys = selected.map((n) => n.position.y)
+    const minX = Math.min(...xs)
+    const maxX = Math.max(...xs)
+    const minY = Math.min(...ys)
+    const maxY = Math.max(...ys)
+    setNodes((ns) =>
+      ns.map((n) => {
+        if (!n.selected) return n
+        let { x, y } = n.position
+        if (kind === 'left') x = minX
+        if (kind === 'right') x = maxX
+        if (kind === 'hcenter') x = (minX + maxX) / 2
+        if (kind === 'top') y = minY
+        if (kind === 'bottom') y = maxY
+        if (kind === 'vcenter') y = (minY + maxY) / 2
+        return { ...n, position: { x: Math.round(x), y: Math.round(y) } }
+      }),
+    )
+    setDirty(true)
+  }
+
+  const distribute = (axis: 'x' | 'y') => {
+    if (selected.length < 3) return
+    pushHistory()
+    const sorted = selected
+      .slice()
+      .sort((a, b) => (axis === 'x' ? a.position.x - b.position.x : a.position.y - b.position.y))
+    const first = axis === 'x' ? sorted[0].position.x : sorted[0].position.y
+    const last = axis === 'x' ? sorted[sorted.length - 1].position.x : sorted[sorted.length - 1].position.y
+    const step = (last - first) / (sorted.length - 1)
+    const target = new Map(sorted.map((n, i) => [n.id, Math.round(first + step * i)]))
+    setNodes((ns) =>
+      ns.map((n) =>
+        n.selected
+          ? {
+              ...n,
+              position:
+                axis === 'x'
+                  ? { x: target.get(n.id)!, y: n.position.y }
+                  : { x: n.position.x, y: target.get(n.id)! },
+            }
+          : n,
+      ),
+    )
+    setDirty(true)
+  }
+
+  const groupSelected = () => {
+    if (selected.length < 2) return
+    const name = window.prompt('给这个分组起个名字', '分组')
+    if (name === null) return
+    pushHistory()
+    setGroups((gs) => [
+      ...gs,
+      {
+        id: 'g' + Math.random().toString(16).slice(2, 8),
+        name: name.trim() || '分组',
+        members: selected.map((n) => n.id),
+        color: '#EAF1FE',
+      },
+    ])
+    setDirty(true)
+  }
+
+  const ungroupSelected = () => {
+    if (!selected.length) return
+    const ids = new Set(selected.map((n) => n.id))
+    pushHistory()
+    setGroups((gs) => gs.filter((g) => !g.members.every((m) => ids.has(m))))
+    setDirty(true)
   }
 
   const sel = nodes.find((n) => n.id === selId)
@@ -575,7 +714,7 @@ function Editor() {
           <button onClick={() => setNewOpen(true)} title="新建一个流程">
             ＋ 新建
           </button>
-          <button onClick={() => addNode()} title="Ctrl+N">
+          <button onClick={() => addNode()} title="Ctrl+N" disabled={mode !== 'edit'}>
             ＋ 卡片
           </button>
           <div className="group">
@@ -633,7 +772,7 @@ function Editor() {
         <div className="main">
           <div className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
             <ReactFlow
-              nodes={nodes}
+              nodes={rfNodes}
               edges={edges}
               onNodesChange={onNodesChange}
               onEdgesChange={onEdgesChange}
@@ -662,7 +801,26 @@ function Editor() {
               fitViewOptions={{ padding: 0.25, maxZoom: 1.1 }}
               proOptions={{ hideAttribution: true }}
             >
-              <Background variant={BackgroundVariant.Dots} gap={22} size={1} color="#d9dee5" />
+              <Background id="big" variant={BackgroundVariant.Lines} gap={110} color="#e4e8ec" lineWidth={1} />
+              <Background id="small" variant={BackgroundVariant.Lines} gap={22} color="#eef1f4" lineWidth={1} />
+              {mode === 'edit' && selected.length >= 2 ? (
+                <Panel position="top-center" className="selbar">
+                  <button onClick={() => align('left')} title="左对齐">⇤</button>
+                  <button onClick={() => align('hcenter')} title="水平居中">⇔</button>
+                  <button onClick={() => align('right')} title="右对齐">⇥</button>
+                  <span className="sep" />
+                  <button onClick={() => align('top')} title="顶对齐">⇡</button>
+                  <button onClick={() => align('vcenter')} title="垂直居中">⇕</button>
+                  <button onClick={() => align('bottom')} title="底对齐">⇣</button>
+                  <span className="sep" />
+                  <button onClick={() => distribute('x')} title="水平等距">⇹</button>
+                  <button onClick={() => distribute('y')} title="垂直等距">⇳</button>
+                  <span className="sep" />
+                  <button onClick={groupSelected} title="把选中的卡片装进一个分组框">成组</button>
+                  <button onClick={ungroupSelected} title="拆掉选中卡片所在的分组">解组</button>
+                  <span className="cnt">{selected.length} 张</span>
+                </Panel>
+              ) : null}
               <Controls showInteractive={false} position="bottom-right" />
               <MiniMap
                 pannable
@@ -684,6 +842,15 @@ function Editor() {
               statuses={statuses}
               project={project}
               mode={mode}
+              width={drawerW}
+              onWidth={(w) => {
+                setDrawerW(w)
+                localStorage.setItem('fb.drawerW', String(w))
+              }}
+              float={drawerFloat}
+              onToggleFloat={() => setDrawerFloat((f) => !f)}
+              pos={drawerPos}
+              onPos={setDrawerPos}
               onPatch={(p) => patch(sel.id, p)}
               onClose={() => setSelId(null)}
               onToast={(m) => setMsg(m)}

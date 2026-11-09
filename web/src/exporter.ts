@@ -1,5 +1,5 @@
 import type { Doc, FlowNode, Status } from './types'
-import { fieldText, normList, optionsOf } from './fields'
+import { fieldText, normList, optionsOf, parseLink } from './fields'
 import { CARD_H, CARD_W, edgePath, pathMid } from './geometry'
 import { fileDataUrl } from './storage'
 
@@ -43,18 +43,32 @@ function fieldHtml(f: any, images: Record<string, string>): string {
   const v = f?.value
   const label = `<div class="fl">${esc(f?.label || '')}</div>`
 
-  if (t === 'image' || t === 'attachment') {
+  if (t === 'image') {
+    const items: any[] = Array.isArray(v) ? v : []
+    if (!items.length) return label + '<div class="vempty">—</div>'
+    const cells = items
+      .map((m) => {
+        const rel = String(m)
+        const src = images[rel] || ''
+        const name = baseName(rel)
+        return `<div class="imgcell">${
+          src
+            ? `<img class="imgsrc" src="${src}" alt="">`
+            : '<div class="imgsrc ph"></div>'
+        }<span class="imgname">${esc(name)}</span></div>`
+      })
+      .join('')
+    return label + `<div class="assets">${cells}</div>`
+  }
+
+  if (t === 'attachment') {
     const items: any[] = Array.isArray(v) ? v : []
     if (!items.length) return label + '<div class="vempty">—</div>'
     const rows = items
       .map((m) => {
-        const rel = t === 'image' ? String(m) : String(m?.file || '')
-        const name = t === 'image' ? baseName(rel) : m?.name || baseName(rel)
-        const src = images[rel] || ''
-        const thumb =
-          t === 'image' && src ? `<img class="at" src="${src}" alt="">` : '<span class="at ph"></span>'
-        const mark = t === 'image' ? '' : `<span class="mk${m?.done ? ' ok' : ''}">${m?.done ? '✓' : '○'}</span>`
-        return `<div class="ar">${thumb}${mark}<span class="an">${esc(name)}</span></div>`
+        const rel = String(m?.file || '')
+        const mark = `<span class="mk${m?.done ? ' ok' : ''}">${m?.done ? '✓' : '○'}</span>`
+        return `<div class="ar">${mark}<span class="an">${esc(m?.name || baseName(rel))}</span></div>`
       })
       .join('')
     return label + `<div class="assets">${rows}</div>`
@@ -89,10 +103,18 @@ function fieldHtml(f: any, images: Record<string, string>): string {
 
   if (t === 'link') {
     const obj = v && typeof v === 'object' ? v : { url: String(v || ''), text: '' }
-    const url = String(obj.url || '').trim()
-    if (!url) return label + '<div class="vempty">—</div>'
-    const href = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url}`
-    return label + `<a class="vbtn" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(obj.text || url)} ↗</a>`
+    const { kind, href } = parseLink(obj.url)
+    if (kind === 'empty') return label + '<div class="vempty">—</div>'
+    const label2 =
+      obj.text ||
+      (kind === 'path' ? href.split(/[\\/]/).pop() : href.replace(/^https?:\/\//, ''))
+    if (kind === 'path') {
+      return (
+        label +
+        `<span class="vbtn ghost" title="${esc(href)}">${esc(label2)}（本地文件）</span>`
+      )
+    }
+    return label + `<a class="vbtn" href="${esc(href)}" target="_blank" rel="noreferrer">${esc(label2)} ↗</a>`
   }
 
   if (t === 'checkbox') {
@@ -115,8 +137,13 @@ const EXPORT_CSS = `
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{font:14px/1.6 "Microsoft YaHei UI","PingFang SC",system-ui,sans-serif;color:#1f2329;
- background:#fbfbfc;display:flex;flex-direction:column;overflow:hidden;
- background-image:radial-gradient(#dfe3e8 1px,transparent 1px);background-size:22px 22px}
+ background-color:#fbfbfc;display:flex;flex-direction:column;overflow:hidden;
+ background-image:
+  linear-gradient(#eef1f4 1px,transparent 1px),
+  linear-gradient(90deg,#eef1f4 1px,transparent 1px),
+  linear-gradient(#e4e8ec 1px,transparent 1px),
+  linear-gradient(90deg,#e4e8ec 1px,transparent 1px);
+ background-size:22px 22px,22px 22px,110px 110px,110px 110px}
 header{display:flex;align-items:center;gap:12px;padding:9px 16px;background:#fff;
  border-bottom:1px solid #e6e8eb;flex:0 0 auto;z-index:5}
 .h1{font-size:15px;font-weight:600}
@@ -172,10 +199,15 @@ main.drag{cursor:grabbing}
 .vempty{font-size:12.5px;color:#c3c9d2}
 .vbtn{display:inline-flex;align-items:center;gap:4px;margin-top:4px;padding:4px 12px;font-size:12.5px;
  color:#fff;background:#2563eb;border-radius:7px;text-decoration:none}
-.assets{display:flex;flex-direction:column;gap:4px;margin-top:4px}
+.assets{display:flex;flex-direction:column;gap:6px;margin-top:4px}
 .ar,.vr{display:flex;align-items:center;gap:8px;font-size:12.5px;padding:2px 0}
-.at{width:72px;height:48px;object-fit:cover;border-radius:5px;border:1px solid #e6e8eb;flex:0 0 auto}
-.at.ph{background:#f2f3f5;display:inline-block}
+.imgcell{position:relative}
+.imgsrc{display:block;width:100%;border-radius:8px;border:1px solid #e6e8eb;background:#f2f3f5}
+.imgsrc.ph{height:90px}
+.imgname{position:absolute;right:6px;bottom:6px;max-width:calc(100% - 16px);font-size:10.5px;
+ color:#fff;background:rgba(17,24,39,.62);padding:1px 7px;border-radius:6px;overflow:hidden;
+ text-overflow:ellipsis;white-space:nowrap}
+.vbtn.ghost{background:#eef2ff;color:#1e40af;cursor:default}
 .mk{width:16px;text-align:center;color:#b9c0cb;flex:0 0 auto}
 .mk.ok{color:#15803d}
 .an{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

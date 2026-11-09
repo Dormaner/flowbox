@@ -21,11 +21,13 @@ export type FlowEdge = { a: string; b: string; label?: string }
 
 export type Status = { key: string; label: string; color: string }
 
+export type Group = { id: string; name: string; members: string[]; color?: string }
+
 export type Doc = {
   nodes: FlowNode[]
   edges: FlowEdge[]
   statuses: Status[]
-  groups?: { id: string; name: string; members: string[]; color?: string }[]
+  groups?: Group[]
 }
 
 export const DEFAULT_STATUSES: Status[] = [

@@ -68,7 +68,7 @@ const drawer = await page.$('.drawer .dname')
 check('点卡片打开抽屉', Boolean(drawer))
 
 // 3.5) 字段：添加 / 改名 / 删除
-page.on('dialog', (d) => d.accept())
+page.on('dialog', (d) => (d.type() === 'prompt' ? d.accept('测试分组') : d.accept()))
 const f0 = await page.$$eval('.dfield', (els) => els.length)
 await page.click('.addfield')
 await sleep(200)
@@ -101,10 +101,10 @@ check('删除字段', f2 === f0, `${f1} -> ${f2}`)
 // 3.7) 上传文件 → 一行一个
 const fileInput = await page.$('.dfield input[type=file]')
 if (fileInput) {
-  const before = await page.$$eval('.assetrow', (els) => els.length)
+  const before = await page.$$eval('.assetrow, .imgcell', (els) => els.length)
   await fileInput.uploadFile(process.env.FB_IMG || 'C:/Users/niu/AppData/Local/Temp/fb_upload.png')
   await sleep(1800)
-  const after = await page.$$eval('.assetrow', (els) => els.length)
+  const after = await page.$$eval('.assetrow, .imgcell', (els) => els.length)
   check('上传文件生成一行', after > before, `${before} -> ${after}`)
 } else {
   check('上传文件生成一行', false, '找不到文件输入')
@@ -130,10 +130,33 @@ const fs = await import('node:fs')
 const files = fs.existsSync(dl) ? fs.readdirSync(dl).filter((f) => f.endsWith('.html')) : []
 check('导出网页', files.length > 0, files.join(','))
 if (files.length) process.env.FB_EXPORT = `${dl}/${files[files.length - 1]}`
+// 3.9) 多选 → 排版 / 成组
+let cs = await page.$$('.card')
+await cs[0].click()
+await page.keyboard.down('Control')
+await cs[1].click()
+await page.keyboard.up('Control')
+await sleep(350)
+check('多选出现排版工具条', Boolean(await page.$('.selbar')))
+
+await page.click('.selbar button[title="左对齐"]')
+await sleep(350)
+const xs = await page.$$eval('.card', (els) =>
+  els.map((e) => Math.round(e.getBoundingClientRect().x)),
+)
+const dup = xs.filter((x, i) => xs.indexOf(x) !== i).length
+check('左对齐生效', dup >= 1, xs.join(','))
+
+await page.click('.selbar button[title="把选中的卡片装进一个分组框"]')
+await sleep(400)
+check('成组出现分组框', Boolean(await page.$('.groupbox')))
+
 await page.keyboard.press('Escape')
 await sleep(150)
 const handles = await page.evaluate(() => {
-  const cards = [...document.querySelectorAll('.react-flow__node')]
+  const cards = [...document.querySelectorAll('.react-flow__node')].filter((el) =>
+    el.querySelector('.card'),
+  )
   const pick = (el, sel) => {
     const h = el.querySelector(sel)
     const r = h.getBoundingClientRect()

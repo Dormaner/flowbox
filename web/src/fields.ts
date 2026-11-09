@@ -34,6 +34,22 @@ export function fieldText(f: Field): string {
   return String(v ?? '')
 }
 
+/** 解析超链接：http(s) 直接开，本地路径（C:\ / \\server\ / file://）交给系统 */
+export function parseLink(raw: string): { kind: 'url' | 'path' | 'empty'; href: string } {
+  const v = String(raw || '').trim()
+  if (!v) return { kind: 'empty', href: '' }
+  if (/^file:\/\//i.test(v)) {
+    return { kind: 'path', href: decodeURI(v.replace(/^file:\/\//i, '')) }
+  }
+  if (/^[a-z]:[\\/]/i.test(v) || v.startsWith('\\\\')) {
+    return { kind: 'path', href: v }
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) {
+    return { kind: 'url', href: v }
+  }
+  return { kind: 'url', href: `https://${v}` }
+}
+
 export function humanSize(bytes: number): string {
   if (!bytes) return ''
   if (bytes < 1024) return `${bytes} B`

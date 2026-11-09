@@ -53,6 +53,12 @@ type Props = {
   statuses: Status[]
   project: string
   mode: 'edit' | 'view'
+  width: number
+  onWidth: (w: number) => void
+  float: boolean
+  onToggleFloat: () => void
+  pos: { x: number; y: number }
+  onPos: (p: { x: number; y: number }) => void
   onPatch: (patch: Partial<FlowNode>) => void
   onClose: () => void
   onToast: (msg: string) => void
@@ -63,6 +69,12 @@ export default function Drawer({
   statuses,
   project,
   mode,
+  width,
+  onWidth,
+  float,
+  onToggleFloat,
+  pos,
+  onPos,
   onPatch,
   onClose,
   onToast,
@@ -103,11 +115,61 @@ export default function Drawer({
     setFields([...fields, { type, label: labelOf(type), value: blankValue(type) }])
   }
 
+  const startResize = (e: React.PointerEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startX = e.clientX
+    const startW = width
+    document.body.style.cursor = 'col-resize'
+    const move = (ev: PointerEvent) =>
+      onWidth(Math.min(820, Math.max(300, startW + (startX - ev.clientX))))
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      document.body.style.cursor = ''
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
+  const startDrag = (e: React.PointerEvent) => {
+    if (!float) return
+    if ((e.target as HTMLElement).closest('button, .resizer')) return
+    e.preventDefault()
+    const ox = e.clientX - pos.x
+    const oy = e.clientY - pos.y
+    const move = (ev: PointerEvent) =>
+      onPos({
+        x: Math.min(window.innerWidth - 160, Math.max(0, ev.clientX - ox)),
+        y: Math.min(window.innerHeight - 80, Math.max(0, ev.clientY - oy)),
+      })
+    const up = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+    }
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+  }
+
   return (
-    <aside className="drawer">
-      <div className="dh">
+    <aside
+      className={'drawer' + (float ? ' float' : '')}
+      style={{ width, ...(float ? { left: pos.x, top: pos.y } : {}) }}
+    >
+      <div className="resizer" onPointerDown={startResize} title="拖动调宽" />
+      <div
+        className="dh"
+        onPointerDown={startDrag}
+        style={{ cursor: float ? 'move' : 'default' }}
+      >
         <span>{edit ? '卡片 · 编辑' : '卡片 · 预览'}</span>
         <span className="sp" />
+        <button
+          title={float ? '停靠到右侧' : '变成浮动窗口（可拖动）'}
+          onClick={onToggleFloat}
+        >
+          {float ? '⇥' : '⧉'}
+        </button>
         <button onClick={onClose}>✕</button>
       </div>
       <div className="db">

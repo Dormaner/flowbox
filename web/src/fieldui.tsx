@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Field } from './types'
-import { humanSize, normList, optionsOf } from './fields'
-import { fileDataUrl, openAsset } from './storage'
+import { humanSize, normList, optionsOf, parseLink } from './fields'
+import { fileDataUrl, openAsset, openUrl } from './storage'
 import { uploadFile } from './assets'
 
 export function Thumb({
@@ -39,6 +39,43 @@ export function Thumb({
 }
 
 const baseName = (rel: string) => (rel.split(/[\\/]/).pop() || rel).replace(/\.[^.]+$/, '')
+
+/** 图片占满一行：名字放图片右下角，按钮悬停才出来 */
+function BigImg({
+  project,
+  rel,
+  onClick,
+}: {
+  project: string
+  rel: string
+  onClick?: () => void
+}) {
+  const [src, setSrc] = useState('')
+  useEffect(() => {
+    let alive = true
+    fileDataUrl(project, rel)
+      .then((u) => {
+        if (alive) setSrc(u)
+      })
+      .catch(() => {})
+    return () => {
+      alive = false
+    }
+  }, [project, rel])
+  const name = (rel.split(/[\\/]/).pop() || rel)
+  return (
+    <div className="imgrow">
+      {src ? (
+        <img className="imgsrc" src={src} alt="" onClick={onClick} />
+      ) : (
+        <div className="imgsrc ph" onClick={onClick} />
+      )}
+      <span className="imgname" title={rel}>
+        {name}
+      </span>
+    </div>
+  )
+}
 
 export function FieldEdit({
   field,
@@ -94,32 +131,56 @@ export function FieldEdit({
     />
   )
 
-  if (t === 'image' || t === 'attachment') {
+  if (t === 'image') {
+    const items: string[] = Array.isArray(v) ? v.map(String) : []
+    return (
+      <div className="assets">
+        {items.map((rel, i) => (
+          <div className="imgcell" key={i}>
+            <BigImg project={project} rel={rel} onClick={() => openAsset(project, rel)} />
+            <div className="imgbtns">
+              <button className="ar-act" onClick={() => openAsset(project, rel)}>
+                打开
+              </button>
+              <button
+                className="ar-act danger"
+                title="移除"
+                onClick={() => onChange(items.filter((_, j) => j !== i))}
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+        ))}
+        <button className="ar-add" onClick={() => fileRef.current?.click()}>
+          ＋ 添加图片
+        </button>
+        {hidden}
+      </div>
+    )
+  }
+
+  if (t === 'attachment') {
     const items: any[] = Array.isArray(v) ? v : []
     return (
       <div className="assets">
         {items.map((m, i) => {
-          const rel = t === 'image' ? String(m) : String(m?.file || '')
-          const name = t === 'image' ? baseName(rel) : m?.name || baseName(rel)
+          const rel = String(m?.file || '')
           return (
             <div className="assetrow" key={i}>
-              {t === 'image' ? (
-                <Thumb project={project} rel={rel} />
-              ) : (
-                <span
-                  className={'ar-mark' + (m?.done ? ' ok' : '')}
-                  title="点一下切换备齐 / 未备"
-                  onClick={() => {
-                    const next = items.slice()
-                    next[i] = { ...m, done: !m?.done }
-                    onChange(next)
-                  }}
-                >
-                  {m?.done ? '✓' : '○'}
-                </span>
-              )}
+              <span
+                className={'ar-mark' + (m?.done ? ' ok' : '')}
+                title="点一下切换备齐 / 未备"
+                onClick={() => {
+                  const next = items.slice()
+                  next[i] = { ...m, done: !m?.done }
+                  onChange(next)
+                }}
+              >
+                {m?.done ? '✓' : '○'}
+              </span>
               <span className="ar-name" title={rel}>
-                {name}
+                {m?.name || baseName(rel)}
               </span>
               <span className="ar-meta">{humanSize(m?.size || 0)}</span>
               <button className="ar-act" onClick={() => openAsset(project, rel)}>
@@ -136,7 +197,7 @@ export function FieldEdit({
           )
         })}
         <button className="ar-add" onClick={() => fileRef.current?.click()}>
-          ＋ 添加{t === 'image' ? '图片' : '附件'}
+          ＋ 添加附件
         </button>
         {hidden}
       </div>
@@ -233,14 +294,13 @@ export function FieldEdit({
 
   if (t === 'link') {
     const obj = v && typeof v === 'object' ? v : { url: String(v || ''), text: '' }
-    const url = obj.url || ''
-    const href = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : url ? `https://${url}` : ''
+    const { kind, href } = parseLink(obj.url)
     return (
       <div>
         <input
           type="text"
-          defaultValue={url}
-          placeholder="网址，比如 oa.example.com"
+          defaultValue={obj.url || ''}
+          placeholder="网址，或本地文件 C:\xxx.pdf / \\server\共享\xx.docx"
           onBlur={(e) => onChange({ ...obj, url: e.target.value.trim() })}
         />
         <input
@@ -250,16 +310,13 @@ export function FieldEdit({
           style={{ marginTop: 4 }}
           onBlur={(e) => onChange({ ...obj, text: e.target.value.trim() })}
         />
-        {href ? (
-          <a
-            className="ar-act"
-            href={href}
-            target="_blank"
-            rel="noreferrer"
-            style={{ marginTop: 6, display: 'inline-block' }}
-          >
-            测试打开 ↗
-          </a>
+        {kind !== 'empty' ? (
+          <div className="linktest">
+            <button className="ar-act" onClick={() => openUrl(obj.url)}>
+              测试打开 ↗
+            </button>
+            <span className="linkkind">{kind === 'path' ? '本地文件' : '网址'}</span>
+          </div>
         ) : null}
       </div>
     )
@@ -297,23 +354,30 @@ export function FieldView({ field, project }: { field: Field; project: string })
   const t = field.type || 'text'
   const v = field.value
 
-  if (t === 'image' || t === 'attachment') {
+  if (t === 'image') {
+    const items: string[] = Array.isArray(v) ? v.map(String) : []
+    if (!items.length) return <div className="vempty">—</div>
+    return (
+      <div className="assets">
+        {items.map((rel, i) => (
+          <BigImg key={i} project={project} rel={rel} onClick={() => openAsset(project, rel)} />
+        ))}
+      </div>
+    )
+  }
+
+  if (t === 'attachment') {
     const items: any[] = Array.isArray(v) ? v : []
     if (!items.length) return <div className="vempty">—</div>
     return (
       <div className="assets">
         {items.map((m, i) => {
-          const rel = t === 'image' ? String(m) : String(m?.file || '')
-          const name = t === 'image' ? baseName(rel) : m?.name || baseName(rel)
+          const rel = String(m?.file || '')
           return (
             <div className="assetrow" key={i}>
-              {t === 'image' ? (
-                <Thumb project={project} rel={rel} />
-              ) : (
-                <span className={'ar-mark' + (m?.done ? ' ok' : '')}>{m?.done ? '✓' : '○'}</span>
-              )}
+              <span className={'ar-mark' + (m?.done ? ' ok' : '')}>{m?.done ? '✓' : '○'}</span>
               <span className="ar-name" title={rel}>
-                {name}
+                {m?.name || baseName(rel)}
               </span>
               <span className="ar-meta">{humanSize(m?.size || 0)}</span>
               <button className="ar-act" onClick={() => openAsset(project, rel)}>
@@ -359,13 +423,17 @@ export function FieldView({ field, project }: { field: Field; project: string })
 
   if (t === 'link') {
     const obj = v && typeof v === 'object' ? v : { url: String(v || ''), text: '' }
-    const url = String(obj.url || '').trim()
-    if (!url) return <div className="vempty">—</div>
-    const href = /^[a-z][a-z0-9+.-]*:\/\//i.test(url) ? url : `https://${url}`
+    const { kind, href } = parseLink(obj.url)
+    if (kind === 'empty') return <div className="vempty">—</div>
+    const label =
+      obj.text ||
+      (kind === 'path'
+        ? href.split(/[\\/]/).pop()
+        : href.replace(/^https?:\/\//, '').replace(/\/$/, ''))
     return (
-      <a className="vbtn" href={href} target="_blank" rel="noreferrer">
-        {obj.text || url} ↗
-      </a>
+      <button className="vbtn" title={href} onClick={() => openUrl(obj.url)}>
+        {label} ↗
+      </button>
     )
   }
 

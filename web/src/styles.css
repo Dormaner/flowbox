@@ -508,7 +508,119 @@ button:hover:disabled { background: transparent; }
 }
 .vbtn:hover { background: #1d4ed8; }
 
-/* 新建流程弹窗 */
+/* 分组框 */
+.groupbox {
+  width: 100%;
+  height: 100%;
+  border: 1px solid #c9d6ea;
+  border-radius: 14px;
+  position: relative;
+  pointer-events: none;
+}
+.groupbox span {
+  position: absolute;
+  left: 10px;
+  top: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5b6b82;
+}
+
+/* 多选后的排版工具条 */
+.selbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  background: #fff;
+  border: 1px solid #e6e8eb;
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(16, 24, 40, 0.12);
+}
+.selbar button {
+  font-size: 13px;
+  line-height: 1;
+  padding: 5px 7px;
+  min-width: 26px;
+}
+.selbar .sep {
+  width: 1px;
+  height: 16px;
+  background: #eef0f2;
+  margin: 0 3px;
+}
+.selbar .cnt {
+  font-size: 11px;
+  color: #9aa1aa;
+  padding-left: 4px;
+}
+
+/* 详情窗：可拖宽 / 可浮动 */
+.drawer { position: relative; }
+.drawer .resizer {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 3;
+}
+.drawer .resizer:hover { background: linear-gradient(90deg, rgba(37, 99, 235, 0.16), transparent); }
+.drawer.float {
+  position: fixed;
+  z-index: 60;
+  border: 1px solid #e6e8eb;
+  border-radius: 12px;
+  max-height: calc(100vh - 24px);
+  box-shadow: 0 18px 50px rgba(16, 24, 40, 0.22);
+}
+
+/* 图片：占满一行，名字在右下角，按钮悬停出现 */
+.imgcell { position: relative; margin-bottom: 6px; }
+.imgrow { position: relative; }
+.imgsrc {
+  display: block;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #e6e8eb;
+  cursor: pointer;
+  background: #f2f3f5;
+}
+.imgsrc.ph { height: 90px; }
+.imgname {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  max-width: calc(100% - 16px);
+  font-size: 10.5px;
+  color: #fff;
+  background: rgba(17, 24, 39, 0.62);
+  padding: 1px 7px;
+  border-radius: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.imgbtns {
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+.imgcell:hover .imgbtns { opacity: 1; }
+.imgbtns .ar-act {
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.18);
+}
+.imgbtns .ar-act.danger { color: #6b7280; }
+
+.linktest { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.linkkind { font-size: 10.5px; color: #9aa1aa; }
 .modal-mask {
   position: fixed;
   inset: 0;
