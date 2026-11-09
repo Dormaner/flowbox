@@ -2,6 +2,7 @@ __pycache__/
 *.py[cod]
 .venv/
 build/
+build_*/
 dist/
 *.spec
 *.exe
