@@ -1,2 +1,4 @@
 pillow>=10.0
 tkinterdnd2>=0.4.2
+# 只有 editor_qt.py（Qt 版编辑器）需要；装不上不影响主程序
+PySide6>=6.5

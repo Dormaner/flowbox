@@ -73,6 +73,41 @@ snapshots/            最近 5 次保存的版本
 - 「列表」按钮切换成竖排阅读版，适合打印和 Ctrl+P 存 PDF
 - 单个 HTML，图片压到 1200 宽内嵌，7 步的项目大约 900 KB，不依赖任何网络
 
+## Qt 版编辑器（试验中）
+
+`editor_qt.py` 是把画布层换成 Qt 的版本，读的是**同一份 `projects/`**，两个版本可以轮流打开同一个项目，互不干扰。
+
+先说清楚状态：**它是拿来试手感的，功能还没 Tk 版全。**
+
+已经有的：
+
+- 画布：滚轮上下滚、Shift+滚轮横滚、Ctrl+滚轮以光标为中心缩放、框选、多选一起拖、10 像素吸附、点阵网格、抗锯齿和阴影
+- 卡片：圆角 + 柔和投影、标题两行超长省略、状态圆点、悬停边框变化、右侧连线圆点悬停才出现
+- 连线：跟 Tk 版同一套几何（直角 + 圆角）加箭头；从卡片右侧圆点拖到另一张卡片就成线，双击线改标签
+- 右侧抽屉：改名、一句话说明、切状态；字段支持 12 种类型，附件和图片能直接选文件，复制进 `files/<卡片id>/`
+- 撤销重做（Ctrl+Z / Ctrl+Y）、改完自动保存、快照、导出只读网页（跟 Tk 版同一个模板）
+
+还没搬过来（要这些就用 Tk 版）：
+
+- 新建项目、模板（报销 / 采购 / 入职）、zip 导入导出
+- 成组、对齐分布、复制粘贴、把文件拖到卡片上
+- 自定义状态编辑、跨项目搜索
+
+跑起来：
+
+```
+pip install PySide6 -i https://pypi.tuna.tsinghua.edu.cn/simple
+python editor_qt.py
+```
+
+或者双击 `启动流程盒子Qt.bat`。打包成 exe 用：
+
+```
+pyinstaller --noconfirm --clean --onefile --windowed --icon flowbox.ico --name 流程盒子Qt editor_qt.py
+```
+
+快捷键：`Ctrl+N` 新建卡片 · `Ctrl+0` 适应窗口 · `Ctrl+1` 100% · `Delete` 删除选中 · `Esc` 取消连线 · 中键拖动平移
+
 ## 局限
 
 - 只有 Windows（用到了 `os.startfile`、单实例互斥锁、tkinterdnd2）
@@ -84,10 +119,12 @@ snapshots/            最近 5 次保存的版本
 
 ```
 canvas_demo.py                        主程序（"流程盒子"本体，文件名是历史遗留）
-html_export.py                        只读网页的模板和排版（导出的那一页靠它）
+editor_qt.py                          Qt 画布版编辑器（试验中，读同一份数据）
+html_export.py                        只读网页的模板和排版（两个版本都用它导出）
 flowbox.py                            更早的原型
 flowbox.ico                           图标
-启动流程盒.bat                         双击启动：有 exe 就开 exe，没有就用 pythonw
+启动流程盒.bat                         双击启动 Tk 版：有 exe 就开 exe，没有就用 pythonw
+启动流程盒子Qt.bat                     双击启动 Qt 版
 examples/patent-annual-fee.flow.json  原型用的示例流程
 ```
 
