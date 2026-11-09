@@ -108,6 +108,53 @@ pyinstaller --noconfirm --clean --onefile --windowed --icon flowbox.ico --name �
 
 快捷键：`Ctrl+N` 新建卡片 · `Ctrl+0` 适应窗口 · `Ctrl+1` 100% · `Delete` 删除选中 · `Esc` 取消连线 · 中键拖动平移
 
+## Web 版编辑器（React + React Flow + Tauri，试验中）
+
+`web/` 是把画布和界面整个换成 Web 技术栈的版本：**React 18 + React Flow 12 + Vite**，桌面外壳用 **Tauri 2（Rust + 系统 WebView2）**。数据还是同一份 `projects/`。
+
+为什么换：Tk 和 Qt 两版都是"自绘一切"——就地编辑、拖放、动画、输入法、高 DPI 都要自己啃。浏览器这些是白送的，观感和手感的上限高得多。
+
+已经有的：
+
+- 画布：滚轮缩放、中键拖动平移、框选多选、点阵网格、小地图、缩放控件
+- 卡片：双击空白新建（自动进入改名）、双击标题/说明就地编辑、悬停浮起、状态圆点（点一下循环切换）
+- 连线：自定义边，走线几何跟 Python 版同一套（直角 + 13 圆角 + 箭头），从卡片右侧圆点拖到另一张卡片
+- 右侧抽屉：改名、说明、状态切换、字段查看与编辑
+- 撤销重做（Ctrl+Z / Ctrl+Y）、改完 700ms 自动存、项目切换、状态统计
+- 桌面版读写走 Rust 命令（`list_projects` / `load_flow` / `save_flow` / `file_data_url`），截图以 data URL 注入
+
+还没做的（这一版是原型，别拿它替换 Tk 版）：
+
+- 新建项目、模板、zip 导入导出、成组对齐、拖放文件、搜索、导出只读网页
+- 状态的自定义编辑（增删改名）
+
+跑浏览器版（改代码时最快）：
+
+```
+cd web
+pip install -r requirements.txt      # 只为了用 python 起 bridge
+python bridge.py                     # 127.0.0.1:8765，把 projects/ 暴露给页面
+npm install
+npm run dev                          # http://localhost:5173
+```
+
+跑桌面版：
+
+```
+cd web
+npm run desktop          # tauri dev，热更新
+npm run dist             # 打 release（要 Rust + MSVC BuildTools）
+```
+
+自动化测试（用本机 Edge 真点）：
+
+```
+cd web
+node e2e.mjs             # 需要 bridge + dev server 都起着
+```
+
+依赖：Node 18+、Rust stable（含 MSVC 链接器）、WebView2 运行时（Win10 1809 以上一般自带）。
+
 ## 局限
 
 - 只有 Windows（用到了 `os.startfile`、单实例互斥锁、tkinterdnd2）
@@ -120,7 +167,8 @@ pyinstaller --noconfirm --clean --onefile --windowed --icon flowbox.ico --name �
 ```
 canvas_demo.py                        主程序（"流程盒子"本体，文件名是历史遗留）
 editor_qt.py                          Qt 画布版编辑器（试验中，读同一份数据）
-html_export.py                        只读网页的模板和排版（两个版本都用它导出）
+web/                                  React + React Flow + Tauri 版（试验中）
+html_export.py                        只读网页的模板和排版（两个 Python 版本都用它导出）
 flowbox.py                            更早的原型
 flowbox.ico                           图标
 启动流程盒.bat                         双击启动 Tk 版：有 exe 就开 exe，没有就用 pythonw
