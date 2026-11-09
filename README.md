@@ -123,6 +123,7 @@ pyinstaller --noconfirm --clean --onefile --windowed --icon flowbox.ico --name �
 - 分组：不画框线只用浅色底，点标题可改名字和颜色，**拖标题条带着整组卡片一起走**
 - 拖动单张卡片：靠近别的卡片时会自动对齐，并画出横向/竖向/居中参考线
 - 右侧抽屉是一个 Markdown 编辑器：标题 + 状态 + 正文，按钮栏（加粗/标题/列表/勾选清单/表格/插入文件），Ctrl+/ 切编辑与预览；左边缘可拖动调宽，可切成浮动窗口
+- 卡片宽度三档（窄 170 / 标准 220 / 宽 300，抽屉里点一下即可），高度按「标题行数 + 摘要 + 小字」自动算，画布和导出用同一套算法，保证不裁字
 - 卡片正文 = Markdown 文档，约定三条：卡头元数据（`---\nowner: 张三\ndue: 2026-12-31\n---`）、勾选清单（`- [ ] 合同`）、资源嵌入（`![[files/卡片id/文件]]`）
 - 拖文件进卡片 / Ctrl+V 粘截图 / 点「📎 文件」都会把文件落盘并往正文插入 `![[...]]`；卡片面上显示 `2/3 材料 · 📎 3 · 负责人 · 截止`
 - 预览渲染标题、列表、勾选、表格、引用、代码、图片和附件；老版本的字段数据在打开时自动转成 Markdown（一次性迁移）
@@ -155,11 +156,13 @@ npm run desktop          # tauri dev，热更新
 npm run dist             # 打 release（要 Rust + MSVC BuildTools）
 ```
 
-自动化测试（用本机 Edge 真点）：
+自动化测试（用本机 Edge 真点，**只跑临时目录里的「测试项目」**，项目名不对会直接退出）：
 
 ```
+# 准备一份临时数据（别指向真实 projects/，e2e 会建卡、上传、连线）
+python web/bridge.py 8765 %TEMP%\fb_web_test\projects
 cd web
-node e2e.mjs             # 需要 bridge + dev server 都起着
+node e2e.mjs             # 需要 bridge + dev server 都起着，14 项全过才算好
 ```
 
 依赖：Node 18+、Rust stable（含 MSVC 链接器）、WebView2 运行时（Win10 1809 以上一般自带）。

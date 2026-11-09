@@ -1,6 +1,7 @@
 import type { Doc, FlowNode, Status } from './types'
 import { fieldText, normList, optionsOf, parseLink } from './fields'
 import { CARD_H, CARD_W, edgePath, pathMid } from './geometry'
+import { cardSize } from './layout'
 import { fileDataUrl } from './storage'
 import { mdStats, mdToHtml } from './markdown'
 import { bodyOf } from './migrate'
@@ -170,7 +171,7 @@ main.drag{cursor:grabbing}
 .edge.dim{opacity:.1}
 .edge.hl{stroke:#2563eb;stroke-width:2.4}
 .elab{font-size:11px;fill:#5b6373;text-anchor:middle;paint-order:stroke;stroke:#fbfbfc;stroke-width:4px}
-.card{position:absolute;width:190px;height:88px;padding:10px 12px;background:#fff;
+.card{position:absolute;padding:10px 12px;background:#fff;box-sizing:border-box;overflow:hidden;
  border:1px solid #e3e5e8;border-radius:12px;cursor:pointer;
  box-shadow:0 1px 2px rgba(16,24,40,.06),0 1px 3px rgba(16,24,40,.04);
  transition:box-shadow .16s,border-color .16s,transform .16s}
@@ -179,7 +180,9 @@ main.drag{cursor:grabbing}
 .card.dim{opacity:.25}
 .card.hit{border-color:#f59e0b;box-shadow:0 0 0 3px #fef3c7}
 .ct{font-size:13px;font-weight:600;line-height:1.35;max-height:2.7em;overflow:hidden;padding-right:10px}
-.cs{margin-top:3px;font-size:11.5px;line-height:1.4;color:#6b7280;max-height:2.8em;overflow:hidden}
+.cs{margin-top:3px;font-size:11.5px;line-height:1.4;color:#6b7280;overflow:hidden;
+ display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.mini{margin-top:3px;font-size:10.5px;color:#9aa1aa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dot{position:absolute;top:9px;right:9px;width:8px;height:8px;border-radius:50%}
 #panel{position:absolute;top:0;right:0;bottom:0;width:min(400px,86vw);background:#fff;
  border-left:1px solid #e6e8eb;box-shadow:-12px 0 34px rgba(16,24,40,.1);overflow:auto;
@@ -324,8 +327,8 @@ export async function buildExportHtml(
   const ys = nodes.length ? nodes.map((n) => n.y) : [0]
   const x1 = Math.min(...xs) - PAD
   const y1 = Math.min(...ys) - PAD
-  const x2 = Math.max(...nodes.map((n) => n.x + CARD_W), 320) + PAD
-  const y2 = Math.max(...nodes.map((n) => n.y + CARD_H), 200) + PAD
+  const x2 = Math.max(...nodes.map((n) => n.x + cardSize(n).w), 320) + PAD
+  const y2 = Math.max(...nodes.map((n) => n.y + cardSize(n).h), 200) + PAD
   const ox = -x1
   const oy = -y1
   const W = Math.max(x2 - x1, 400)
@@ -337,10 +340,21 @@ export async function buildExportHtml(
   const cards = nodes
     .map((n, i) => {
       const st = stOf(n)
-      const hay = [n.name, n.summary, ...(n.fields || []).map((f) => `${f.label} ${fieldText(f)}`)]
+      const sz = cardSize(n)
+      const stats = mdStats(bodyOf(n))
+      const sum = String(n.summary || stats.summary || '')
+      const chips = [
+        stats.checks.total ? `${stats.checks.done}/${stats.checks.total} 材料` : '',
+        stats.files.length ? `📎 ${stats.files.length}` : '',
+        stats.owner,
+        stats.due,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+      const hay = [n.name, sum, ...(n.fields || []).map((f) => `${f.label} ${fieldText(f)}`)]
         .join(' ')
         .toLowerCase()
-      return `<div class="card" data-k="${i}" data-s="${esc(hay)}" style="left:${n.x + ox}px;top:${n.y + oy}px"><div class="ct">${esc(n.name || '未命名')}</div><div class="cs">${esc(n.summary || '')}</div><i class="dot" style="background:${esc(st?.color || '#C7CBD1')}"></i></div>`
+      return `<div class="card" data-k="${i}" data-s="${esc(hay)}" style="left:${n.x + ox}px;top:${n.y + oy}px;width:${sz.w}px;height:${sz.h}px"><div class="ct">${esc(n.name || '未命名')}</div><div class="cs">${esc(sum)}</div>${chips ? `<div class="mini">${esc(chips)}</div>` : ''}<i class="dot" style="background:${esc(st?.color || '#C7CBD1')}"></i></div>`
     })
     .join('')
 
@@ -364,10 +378,10 @@ export async function buildExportHtml(
     if (ia === undefined || ib === undefined) continue
     const A = nodes[ia]
     const B = nodes[ib]
-    const sx = A.x + CARD_W + ox
-    const sy = A.y + CARD_H / 2 + oy
+    const sx = A.x + cardSize(A).w + ox
+    const sy = A.y + cardSize(A).h / 2 + oy
     const tx = B.x + ox
-    const ty = B.y + CARD_H / 2 + oy
+    const ty = B.y + cardSize(B).h / 2 + oy
     paths.push(`<path class="edge" data-a="${ia}" data-b="${ib}" d="${edgePath(sx, sy, tx, ty)}"/>`)
     pairs.push([ia, ib])
     if (e.label) {

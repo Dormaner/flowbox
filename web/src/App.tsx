@@ -23,6 +23,7 @@ import CardNode, { EditorCtx } from './CardNode'
 import Drawer from './Drawer'
 import { HoverCtx } from './hover'
 import { CARD_W, CARD_H, bezierAt, edgePath, pathMid } from './geometry'
+import { DEFAULT_W, cardHeight, cardSize, cardWidth } from './layout'
 import { DEFAULT_STATUSES, type Doc, type FlowNode, type Group, type Status } from './types'
 import {
   createProject,
@@ -179,11 +180,15 @@ function Editor() {
     (id: string, p: Partial<FlowNode>) => {
       pushHistory()
       setNodes((ns) =>
-        ns.map((n) =>
-          n.id === id
-            ? { ...n, data: { ...n.data, node: { ...(n.data as any).node, ...p } } }
-            : n,
-        ),
+        ns.map((n) => {
+          if (n.id !== id) return n
+          const node = { ...(n.data as any).node, ...p }
+          return {
+            ...n,
+            data: { ...n.data, node },
+            style: { width: cardWidth(node), height: cardHeight(node) },
+          }
+        }),
       )
       setDirty(true)
     },
@@ -228,7 +233,7 @@ function Editor() {
               zIndex: 2,
               position: { x: n.x, y: n.y },
               data: { node: n },
-              style: { width: CARD_W, height: CARD_H },
+              style: { width: cardWidth(n), height: cardHeight(n) },
             }
           }),
         )
@@ -308,8 +313,8 @@ function Editor() {
       const v = rf.getViewport()
       const p =
         pos ?? {
-          x: (-v.x + window.innerWidth / 2) / v.zoom - CARD_W / 2,
-          y: (-v.y + window.innerHeight / 2) / v.zoom - CARD_H / 2,
+          x: (-v.x + window.innerWidth / 2) / v.zoom - DEFAULT_W / 2,
+          y: (-v.y + window.innerHeight / 2) / v.zoom - 45,
         }
       const x = Math.round(p.x / 10) * 10
       const y = Math.round(p.y / 10) * 10
@@ -330,7 +335,7 @@ function Editor() {
           type: 'card',
           position: { x, y },
           data: { node, autoEdit: true },
-          style: { width: CARD_W, height: CARD_H },
+          style: { width: cardWidth(node), height: cardHeight(node) },
           zIndex: 2,
         },
       ])
@@ -344,7 +349,7 @@ function Editor() {
     (fromId: string) => {
       const src = nodesRef.current.find((n) => n.id === fromId)
       if (!src) return
-      addNode({ x: src.position.x + CARD_W + 70, y: src.position.y })
+      addNode({ x: src.position.x + cardWidth(src) + 70, y: src.position.y })
     },
     [addNode],
   )
@@ -400,7 +405,7 @@ function Editor() {
     if (dbl) {
       lastPane.current.t = 0
       const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
-      addNode({ x: p.x - CARD_W / 2, y: p.y - CARD_H / 2 })
+      addNode({ x: p.x - DEFAULT_W / 2, y: p.y - 45 })
       return
     }
     setSelId(null)
@@ -493,7 +498,8 @@ function Editor() {
     const hit = nodesRef.current.find((n) => {
       const x = n.position.x
       const y = n.position.y
-      return p.x >= x && p.x <= x + CARD_W && p.y >= y && p.y <= y + CARD_H
+      const sz = cardSize(n)
+      return p.x >= x && p.x <= x + sz.w && p.y >= y && p.y <= y + sz.h
     })
     if (!hit) {
       setMsg('把文件拖到某张卡片上')
@@ -647,13 +653,14 @@ function Editor() {
   const onNodeDrag = (_e: any, node: any) => {
     if (node.type !== 'card') return
     const others = nodesRef.current.filter((n) => n.id !== node.id)
-    const sx = [node.position.x, node.position.x + CARD_W / 2, node.position.x + CARD_W]
-    const sy = [node.position.y, node.position.y + CARD_H / 2, node.position.y + CARD_H]
+    const sx = [node.position.x, node.position.x + (node.width || CARD_W) / 2, node.position.x + (node.width || CARD_W)]
+    const sy = [node.position.y, node.position.y + (node.height || CARD_H) / 2, node.position.y + (node.height || CARD_H)]
     let bx: { diff: number; at: number } | null = null
     let by: { diff: number; at: number } | null = null
     for (const o of others) {
-      const ox = [o.position.x, o.position.x + CARD_W / 2, o.position.x + CARD_W]
-      const oy = [o.position.y, o.position.y + CARD_H / 2, o.position.y + CARD_H]
+      const oa = cardSize(o)
+      const ox = [o.position.x, o.position.x + oa.w / 2, o.position.x + oa.w]
+      const oy = [o.position.y, o.position.y + oa.h / 2, o.position.y + oa.h]
       for (const a of sx) {
         for (const b of ox) {
           const d = b - a
@@ -694,8 +701,8 @@ function Editor() {
         if (!mem.length) return null
         const x1 = Math.min(...mem.map((m) => m.position.x)) - 16
         const y1 = Math.min(...mem.map((m) => m.position.y)) - 34
-        const x2 = Math.max(...mem.map((m) => m.position.x + CARD_W)) + 16
-        const y2 = Math.max(...mem.map((m) => m.position.y + CARD_H)) + 16
+        const x2 = Math.max(...mem.map((m) => m.position.x + cardSize(m).w)) + 16
+        const y2 = Math.max(...mem.map((m) => m.position.y + cardSize(m).h)) + 16
         return { g, x: x1, y: y1, w: x2 - x1, h: y2 - y1 }
       })
       .filter(Boolean) as { g: Group; x: number; y: number; w: number; h: number }[]

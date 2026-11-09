@@ -216,7 +216,7 @@ export default function Drawer({
         <button title={float ? '停靠到右侧' : '浮动窗口'} onClick={onToggleFloat}>
           {float ? '⇥' : '⧉'}
         </button>
-        <button onClick={onClose}>✕</button>
+        <button id="d-close" onClick={onClose}>✕</button>
       </div>
 
       <div className="db">
@@ -250,6 +250,28 @@ export default function Drawer({
               材料 {stats.checks.done}/{stats.checks.total}
             </span>
           ) : null}
+        </div>
+
+        <div className="drow">
+          <span>宽度</span>
+          <div className="chips">
+            {[
+              [170, '窄'],
+              [220, '标准'],
+              [300, '宽'],
+            ].map(([w, label]) => (
+              <span
+                key={w}
+                className={
+                  'chip' + ((Number(node.w) || 220) === w ? ' on' : '') + (edit ? '' : ' ro')
+                }
+                onClick={edit ? () => onPatch({ w: Number(w) }) : undefined}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+          <span className="mcount">高度随内容</span>
         </div>
 
         {edit ? (
