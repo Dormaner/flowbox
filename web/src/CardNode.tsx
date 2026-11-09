@@ -5,12 +5,14 @@ import type { FlowNode, Status } from './types'
 
 type Ctx = {
   statuses: Status[]
+  mode: 'edit' | 'view'
   patch: (id: string, patch: Partial<FlowNode>) => void
   cycleState: (id: string) => void
 }
 
 export const EditorCtx = createContext<Ctx>({
   statuses: [],
+  mode: 'edit',
   patch: () => {},
   cycleState: () => {},
 })
@@ -47,6 +49,7 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
 
   const start = (which: 'title' | 'sum') => (e: React.MouseEvent) => {
     e.stopPropagation()
+    if (ctx.mode !== 'edit') return
     setDraft(which === 'title' ? n.name || '' : n.summary || '')
     setEditing(which)
   }
@@ -84,7 +87,7 @@ function CardNodeInner({ id, data, selected }: NodeProps) {
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => {
           e.stopPropagation()
-          ctx.cycleState(id)
+          if (ctx.mode === 'edit') ctx.cycleState(id)
         }}
       />
       {editing === 'title' ? (

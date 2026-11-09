@@ -141,13 +141,24 @@ def _fields_html(n: dict, proj: Path, budget: dict) -> str:
                        f'<div class="fv">{_esc(v)}</div>{hint}</div>')
 
         elif t in ("multiselect", "list"):
-            items = val if isinstance(val, list) else []
-            items = [str(x) for x in items if str(x).strip()]
-            if not items:
+            raw = val if isinstance(val, list) else []
+            rows = []
+            for x in raw:
+                if isinstance(x, dict):
+                    txt = str(x.get("text") or x.get("name") or "").strip()
+                    done = bool(x.get("done"))
+                else:
+                    txt, done = str(x).strip(), False
+                if txt:
+                    rows.append((txt, done))
+            if not rows:
                 continue
-            out.append(f'<div class="f"><div class="fl">{label} · {len(items)} 条</div>'
+            out.append(f'<div class="f"><div class="fl">{label} · {len(rows)} 条</div>'
                        '<ul class="items">'
-                       + "".join(f"<li>{_esc(x)}</li>" for x in items)
+                       + "".join(
+                           f'<li class="{"ok" if d else ""}">'
+                           f'{"✓ " if d else ""}{_esc(t2)}</li>'
+                           for t2, d in rows)
                        + '</ul></div>')
 
         elif t == "attachment":
@@ -441,6 +452,7 @@ body.list #listview{display:block}
 .fh{margin-top:2px;font-size:12px;color:#9aa1aa}
 ul.items,ul.mat{list-style:none;margin:4px 0 0;padding:0}
 ul.items li{position:relative;margin:1px 0;padding-left:14px;font-size:13px}
+ul.items li.ok{color:#9aa1aa;text-decoration:line-through}
 ul.items li:before{content:"";position:absolute;left:2px;top:.62em;width:4px;height:4px;
  border-radius:50%;background:#f59e0b}
 ul.mat li{display:flex;align-items:baseline;gap:7px;padding:2px 0;font-size:13px}

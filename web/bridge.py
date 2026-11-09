@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import mimetypes
 import os
@@ -90,20 +91,56 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         u = urlparse(self.path)
-        if u.path != "/flow":
+        if u.path not in ("/flow", "/asset", "/create_project"):
             self.send_error(404)
             return
         length = int(self.headers.get("Content-Length") or 0)
         body = json.loads(self.rfile.read(length) or b"{}")
-        project = body.get("project") or ""
-        doc = body.get("doc") or {}
-        p = flow_path(project)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        (p.parent / "files").mkdir(exist_ok=True)
-        (p.parent / "snapshots").mkdir(exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(json.dumps(doc, ensure_ascii=False, indent=2), encoding="utf-8")
-        os.replace(tmp, p)
+
+        if u.path == "/flow":
+            p = flow_path(body.get("project") or "")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            (p.parent / "files").mkdir(exist_ok=True)
+            (p.parent / "snapshots").mkdir(exist_ok=True)
+            tmp = p.with_suffix(".tmp")
+            tmp.write_text(json.dumps(body.get("doc") or {}, ensure_ascii=False,
+                                      indent=2), encoding="utf-8")
+            os.replace(tmp, p)
+            self._json({"ok": True})
+            return
+
+        if u.path == "/asset":
+            project = body.get("project") or ""
+            node_id = "".join(c for c in str(body.get("nodeId") or "n")
+                              if c not in '\\/:*?"<>|')
+            name = "".join(c for c in str(body.get("name") or "file")
+                           if c not in '\\/:*?"<>|') or "file"
+            d = flow_path(project).parent / "files" / node_id
+            d.mkdir(parents=True, exist_ok=True)
+            stem, ext = os.path.splitext(name)
+            dst, i = d / name, 1
+            while dst.exists():
+                dst = d / f"{stem}_{i}{ext}"
+                i += 1
+            dst.write_bytes(base64.b64decode(body.get("data") or ""))
+            self._json({"rel": f"files/{node_id}/{dst.name}"})
+            return
+
+        # /create_project
+        name = "".join(c for c in str(body.get("name") or "")
+                       if c not in '\\/:*?"<>|').strip()
+        if not name:
+            self._json({"error": "名字不能为空"}, 400)
+            return
+        d = PROJECTS / name
+        if d.exists():
+            self._json({"error": "已经有同名项目了"}, 400)
+            return
+        (d / "files").mkdir(parents=True)
+        (d / "snapshots").mkdir()
+        (d / "flow.json").write_text(
+            json.dumps(body.get("doc") or {}, ensure_ascii=False, indent=2),
+            encoding="utf-8")
         self._json({"ok": True})
 
 

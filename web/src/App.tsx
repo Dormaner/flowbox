@@ -21,7 +21,17 @@ import Drawer from './Drawer'
 import { HoverCtx } from './hover'
 import { CARD_W, CARD_H, bezierAt, edgePath, pathMid } from './geometry'
 import { DEFAULT_STATUSES, type Doc, type FlowNode, type Status } from './types'
-import { listProjects, loadProject, saveProject } from './storage'
+import {
+  createProject,
+  isDesktop,
+  listProjects,
+  loadProject,
+  openPath,
+  saveProject,
+  writeExport,
+} from './storage'
+import { isImageFile, uploadFile } from './assets'
+import { buildExportHtml } from './exporter'
 
 const nodeTypes = { card: CardNode }
 
@@ -98,6 +108,10 @@ function Editor() {
   const [zoom, setZoom] = useState(100)
   const [hover, setHover] = useState<string | null>(null)
   const hoverCtx = useMemo(() => ({ hover, setHover }), [hover])
+  const [mode, setMode] = useState<'edit' | 'view'>('edit')
+  const [newOpen, setNewOpen] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newTpl, setNewTpl] = useState('blank')
   const [, setHistVer] = useState(0)
   const rf = useReactFlow()
 
@@ -171,7 +185,10 @@ function Editor() {
     [patch],
   )
 
-  const ctx = useMemo(() => ({ statuses, patch, cycleState }), [statuses, patch, cycleState])
+  const ctx = useMemo(
+    () => ({ statuses, mode, patch, cycleState }),
+    [statuses, mode, patch, cycleState],
+  )
 
   const openProject = useCallback(
     async (name: string) => {
@@ -379,6 +396,11 @@ function Editor() {
         addNode()
         return
       }
+      if (meta && k === 'e') {
+        e.preventDefault()
+        setMode((m) => (m === 'edit' ? 'view' : 'edit'))
+        return
+      }
       if (typing) return
       if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault()
@@ -393,6 +415,147 @@ function Editor() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [undo, redo, addNode, addNext, delSelected])
+
+  const baseName = (rel: string) => (rel.split(/[\\/]/).pop() || rel).replace(/\.[^.]+$/, '')
+
+  // 拖文件 / 粘截图 / 选文件 三条路都走这里
+  const addFilesToNode = useCallback(
+    async (nodeId: string, files: File[]) => {
+      if (!files.length) return
+      const cur = nodesRef.current.find((n) => n.id === nodeId)
+      if (!cur) return
+      const node = (cur.data as any).node as FlowNode
+      const fields = (node.fields || []).slice()
+      const imgs = files.filter(isImageFile)
+      const others = files.filter((f) => !isImageFile(f))
+
+      const pushTo = async (type: 'image' | 'attachment', list: File[]) => {
+        if (!list.length) return
+        let idx = fields.findIndex((f) => f.type === type)
+        if (idx < 0) {
+          fields.push({ type, label: type === 'image' ? '图片' : '附件', value: [] })
+          idx = fields.length - 1
+        }
+        const arr: any[] = Array.isArray(fields[idx].value) ? [...fields[idx].value] : []
+        for (const f of list) {
+          try {
+            const saved = await uploadFile(project, nodeId, f)
+            if (type === 'image') arr.push(saved.rel)
+            else
+              arr.push({
+                name: baseName(saved.rel),
+                file: saved.rel,
+                done: true,
+                size: saved.size,
+              })
+          } catch (e: any) {
+            setMsg('上传失败：' + (e?.message || e))
+          }
+        }
+        fields[idx] = { ...fields[idx], value: arr }
+      }
+
+      await pushTo('image', imgs)
+      await pushTo('attachment', others)
+      patch(nodeId, { fields })
+      setSelId(nodeId)
+      setMsg(`已添加 ${files.length} 个文件`)
+    },
+    [patch, project],
+  )
+
+  const onDrop = (e: React.DragEvent) => {
+    const files = Array.from(e.dataTransfer?.files || [])
+    if (!files.length) return
+    e.preventDefault()
+    const p = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY })
+    const hit = nodesRef.current.find((n) => {
+      const x = n.position.x
+      const y = n.position.y
+      return p.x >= x && p.x <= x + CARD_W && p.y >= y && p.y <= y + CARD_H
+    })
+    if (!hit) {
+      setMsg('把文件拖到某张卡片上')
+      return
+    }
+    void addFilesToNode(hit.id, files)
+  }
+
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const t = e.target as HTMLElement | null
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return
+      const files = Array.from(e.clipboardData?.files || [])
+      if (!files.length) return
+      const id = selRef.current
+      if (!id) {
+        setMsg('先点一张卡片，再粘截图')
+        return
+      }
+      e.preventDefault()
+      void addFilesToNode(id, files)
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [addFilesToNode])
+
+  const doNewProject = async () => {
+    const name = newName.trim()
+    if (!name) return
+    try {
+      const st = statusesRef.current
+      const key = st[0]?.key || 'todo'
+      const doc: Doc =
+        newTpl === 'blank'
+          ? { nodes: [], edges: [], statuses: st, groups: [] }
+          : {
+              nodes: [
+                { id: 's1', name: '第一步', summary: '双击卡片改内容', x: 60, y: 200, state: key, fields: [] },
+                { id: 's2', name: '第二步', summary: '', x: 340, y: 200, state: key, fields: [] },
+                { id: 's3', name: '第三步', summary: '', x: 620, y: 200, state: key, fields: [] },
+              ],
+              edges: [
+                { a: 's1', b: 's2' },
+                { a: 's2', b: 's3' },
+              ],
+              statuses: st,
+              groups: [],
+            }
+      await createProject(name, doc)
+      setProjects(await listProjects())
+      await openProject(name)
+      setNewOpen(false)
+      setNewName('')
+    } catch (e: any) {
+      setMsg('新建失败：' + (e?.message || e))
+    }
+  }
+
+  const doExport = async () => {
+    const doc: Doc = {
+      nodes: nodesRef.current.map((n) => ({
+        ...((n.data as any).node as FlowNode),
+        x: n.position.x,
+        y: n.position.y,
+      })),
+      edges: edgesRef.current.map((e) => ({
+        a: e.source,
+        b: e.target,
+        label: ((e.data as any)?.label as string) || '',
+      })),
+      statuses: statusesRef.current,
+      groups: [],
+    }
+    try {
+      setMsg('正在生成…')
+      const html = await buildExportHtml(doc, project, statusesRef.current)
+      const p = await writeExport(project, `${project}.html`, html)
+      setMsg('已导出：' + p)
+      if (isDesktop) await openPath(p)
+    } catch (e: any) {
+      setMsg('导出失败：' + (e?.message || e))
+    }
+  }
 
   const sel = nodes.find((n) => n.id === selId)
 
@@ -409,6 +572,9 @@ function Editor() {
               </option>
             ))}
           </select>
+          <button onClick={() => setNewOpen(true)} title="新建一个流程">
+            ＋ 新建
+          </button>
           <button onClick={() => addNode()} title="Ctrl+N">
             ＋ 卡片
           </button>
@@ -440,11 +606,32 @@ function Editor() {
             })}
           </span>
           <span className="sp" />
+          <div className="group">
+            <button
+              id="m-edit"
+              className={mode === 'edit' ? 'on' : ''}
+              onClick={() => setMode('edit')}
+              title="Ctrl+E"
+            >
+              编辑
+            </button>
+            <button
+              id="m-view"
+              className={mode === 'view' ? 'on' : ''}
+              onClick={() => setMode('view')}
+              title="Ctrl+E"
+            >
+              预览
+            </button>
+          </div>
+          <button id="m-export" onClick={doExport} title="导出一份只读网页">
+            导出网页
+          </button>
           <span className="meta">{dirty ? '未保存…' : msg}</span>
         </div>
 
         <div className="main">
-          <div className="canvas">
+          <div className="canvas" onDragOver={(e) => e.preventDefault()} onDrop={onDrop}>
             <ReactFlow
               nodes={nodes}
               edges={edges}
@@ -453,6 +640,9 @@ function Editor() {
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
               onConnect={onConnect}
+              nodesDraggable={mode === 'edit'}
+              nodesConnectable={mode === 'edit'}
+              elementsSelectable
               onNodeClick={(_, n) => setSelId(n.id)}
               onPaneClick={onPaneClick}
               onNodeDragStart={pushHistory}
@@ -493,11 +683,52 @@ function Editor() {
               node={(sel.data as any).node}
               statuses={statuses}
               project={project}
+              mode={mode}
               onPatch={(p) => patch(sel.id, p)}
               onClose={() => setSelId(null)}
+              onToast={(m) => setMsg(m)}
             />
           ) : null}
         </div>
+
+        {newOpen ? (
+          <div className="modal-mask" onClick={() => setNewOpen(false)}>
+            <div className="modal" onClick={(e) => e.stopPropagation()}>
+              <h3>新建流程</h3>
+              <input
+                autoFocus
+                className="mname"
+                placeholder="流程名字，比如「差旅报销」"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') void doNewProject()
+                  if (e.key === 'Escape') setNewOpen(false)
+                }}
+              />
+              <div className="mrow">
+                {[
+                  ['blank', '空白'],
+                  ['basic', '三步示例'],
+                ].map(([k, label]) => (
+                  <span
+                    key={k}
+                    className={'chip' + (newTpl === k ? ' on' : '')}
+                    onClick={() => setNewTpl(k)}
+                  >
+                    {label}
+                  </span>
+                ))}
+              </div>
+              <div className="mfoot">
+                <button onClick={() => setNewOpen(false)}>取消</button>
+                <button className="primary" onClick={doNewProject} disabled={!newName.trim()}>
+                  创建
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
       </HoverCtx.Provider>
     </EditorCtx.Provider>

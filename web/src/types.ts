@@ -3,6 +3,8 @@ export type Field = {
   label: string
   value: any
   hint?: string
+  /** 单选 / 多选的候选项 */
+  options?: string[]
 }
 
 export type FlowNode = {

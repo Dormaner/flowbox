@@ -1585,13 +1585,19 @@ class App:
             items = val if isinstance(val, list) else []
             self._label(p, f"{label} · {len(items)} 条")
             for it in items:
+                if isinstance(it, dict):
+                    txt = str(it.get("text") or it.get("name") or "")
+                    done = bool(it.get("done"))
+                else:
+                    txt, done = str(it), False
                 row = tk.Frame(p, bg=CARD)
                 row.pack(fill="x", padx=16, pady=1)
-                tk.Label(row, text="·", bg=CARD, fg=WARN, font=FONT).pack(
+                tk.Label(row, text="✓" if done else "·", bg=CARD,
+                         fg=OK if done else WARN, font=FONT).pack(
                     side="left", anchor="n")
-                tk.Label(row, text=str(it), bg=CARD, fg=TEXT, font=FONT_S,
-                         anchor="w", justify="left", wraplength=300).pack(
-                    side="left", padx=(4, 0))
+                tk.Label(row, text=txt, bg=CARD, fg=SUB if done else TEXT,
+                         font=FONT_S, anchor="w", justify="left",
+                         wraplength=300).pack(side="left", padx=(4, 0))
 
         elif t == "attachment":
             items = val if isinstance(val, list) else []

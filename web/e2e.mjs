@@ -49,11 +49,14 @@ check('双击空白新建卡片', n1 === n0 + 1, `${n0} -> ${n1}`)
 check('新卡片自动进入改名', Boolean(hasEdit))
 
 // 2) 就地打字 + 回车提交
-await page.keyboard.type('测试步骤')
+const tag = '步骤' + String(Date.now()).slice(-5)
+await page.keyboard.type(tag)
 await page.keyboard.press('Enter')
 await sleep(300)
-const title = await page.$$eval('.card .ttl', (els) =>
-  els.map((e) => e.textContent || '').filter((t) => t.includes('测试步骤')).length,
+const title = await page.$$eval(
+  '.card .ttl',
+  (els, t) => els.filter((e) => (e.textContent || '').includes(t)).length,
+  tag,
 )
 check('就地改名生效', title === 1, title + ' 张')
 
@@ -95,7 +98,38 @@ await sleep(400)
 const f2 = await page.$$eval('.dfield', (els) => els.length)
 check('删除字段', f2 === f0, `${f1} -> ${f2}`)
 
-// 4) 拖连线：最后一张的右圆点 → 第一张
+// 3.7) 上传文件 → 一行一个
+const fileInput = await page.$('.dfield input[type=file]')
+if (fileInput) {
+  const before = await page.$$eval('.assetrow', (els) => els.length)
+  await fileInput.uploadFile(process.env.FB_IMG || 'C:/Users/niu/AppData/Local/Temp/fb_upload.png')
+  await sleep(1800)
+  const after = await page.$$eval('.assetrow', (els) => els.length)
+  check('上传文件生成一行', after > before, `${before} -> ${after}`)
+} else {
+  check('上传文件生成一行', false, '找不到文件输入')
+}
+
+// 3.6) 预览模式：字段操作消失、只读渲染出来
+await page.click('#m-view')
+await sleep(300)
+const hasAdd = await page.$('.addfield')
+const hasFname = await page.$('.dfield .fname')
+check('预览模式隐藏字段操作', !hasAdd && !hasFname, `add=${!!hasAdd} fname=${!!hasFname}`)
+await page.screenshot({ path: (process.env.FB_SHOT || 'e2e.png').replace('.png', '-view.png') })
+await page.click('#m-edit')
+await sleep(250)
+
+// 3.8) 导出网页（浏览器模式下是下载）
+const dl = process.env.FB_DL || 'C:/Users/niu/AppData/Local/Temp/fb_dl'
+const client = await page.createCDPSession()
+await client.send('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: dl })
+await page.click('#m-export')
+await sleep(2500)
+const fs = await import('node:fs')
+const files = fs.existsSync(dl) ? fs.readdirSync(dl).filter((f) => f.endsWith('.html')) : []
+check('导出网页', files.length > 0, files.join(','))
+if (files.length) process.env.FB_EXPORT = `${dl}/${files[files.length - 1]}`
 await page.keyboard.press('Escape')
 await sleep(150)
 const handles = await page.evaluate(() => {
