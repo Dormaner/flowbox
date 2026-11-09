@@ -11,3 +11,5 @@ web/node_modules/
 web/dist/
 web/src-tauri/target/
 web/src-tauri/gen/
+
+web/shot.png
